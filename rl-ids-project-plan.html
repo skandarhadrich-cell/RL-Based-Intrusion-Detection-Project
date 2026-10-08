@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RL-Based Intrusion Detection Agent — 7-Day Build Plan</title>
+<style>
+  :root{
+    --bg:#0b0f14; --panel:#101620; --panel2:#0d1219; --border:#1f2a37;
+    --text:#e6edf3; --muted:#90a4b8; --green:#4ade80; --orange:#fb923c;
+    --blue:#38bdf8; --red:#f87171; --yellow:#facc15; --purple:#a78bfa;
+  }
+  *{box-sizing:border-box;}
+  body{
+    background:var(--bg); color:var(--text); margin:0; padding:40px 24px 80px;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.55;
+  }
+  .wrap{max-width:980px;margin:0 auto;}
+  header{margin-bottom:40px;}
+  h1{
+    font-size:2.1rem; margin:0 0 8px; letter-spacing:-0.02em;
+    background:linear-gradient(90deg,#fff,var(--green));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .subtitle{color:var(--muted); font-size:1.05rem; margin-bottom:18px;}
+  .meta-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:8px;}
+  .pill{
+    background:var(--panel2); border:1px solid var(--border); color:var(--muted);
+    padding:5px 12px; border-radius:999px; font-size:0.82rem;
+  }
+  .env-callout{
+    background:var(--panel); border:1px solid var(--border); border-left:3px solid var(--blue);
+    border-radius:8px; padding:14px 18px; margin:22px 0 36px; font-size:0.95rem; color:var(--muted);
+  }
+  .env-callout b{color:var(--text);}
+  .day{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:26px 28px; margin-bottom:22px; position:relative;
+  }
+  .day-head{display:flex; align-items:baseline; gap:14px; margin-bottom:6px; flex-wrap:wrap;}
+  .day-num{
+    font-size:0.78rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--bg); background:var(--accent,var(--green)); padding:4px 10px; border-radius:6px;
+  }
+  .day h2{font-size:1.3rem; margin:0; color:var(--text);}
+  .day-goal{color:var(--muted); font-size:0.95rem; margin:6px 0 18px;}
+  h3.sec{
+    font-size:0.78rem; text-transform:uppercase; letter-spacing:0.07em; color:var(--muted);
+    margin:20px 0 8px; border-top:1px solid var(--border); padding-top:16px;
+  }
+  .day h3.sec:first-of-type{border-top:none; padding-top:0; margin-top:0;}
+  ul.tasks{margin:0; padding-left:1.1em;}
+  ul.tasks li{margin-bottom:7px;}
+  code{
+    background:#0a0e14; border:1px solid var(--border); border-radius:4px;
+    padding:1px 6px; font-size:0.88em; color:#c9f3d1;
+    font-family:"SF Mono",Consolas,Monaco,monospace;
+  }
+  pre{
+    background:#0a0e14; border:1px solid var(--border); border-radius:8px;
+    padding:14px 16px; overflow-x:auto; font-size:0.84rem; line-height:1.5;
+    color:#d7e3ee; margin:10px 0;
+  }
+  pre code{background:none; border:none; padding:0;}
+  .checkpoint{
+    background:rgba(74,222,128,0.07); border:1px solid rgba(74,222,128,0.35);
+    border-radius:8px; padding:12px 16px; margin-top:16px; font-size:0.9rem;
+  }
+  .checkpoint b{color:var(--green);}
+  .pitfall{
+    background:rgba(248,113,113,0.07); border:1px solid rgba(248,113,113,0.35);
+    border-radius:8px; padding:12px 16px; margin-top:12px; font-size:0.9rem;
+  }
+  .pitfall b{color:var(--red);}
+  .d1{--accent:var(--green);} .d2{--accent:var(--blue);} .d3{--accent:var(--orange);}
+  .d4{--accent:var(--purple);} .d5{--accent:var(--yellow);} .d6{--accent:#fb7185;}
+  .d7{--accent:#4ade80;}
+  table{width:100%; border-collapse:collapse; margin:10px 0; font-size:0.88rem;}
+  th,td{border:1px solid var(--border); padding:7px 10px; text-align:left;}
+  th{background:var(--panel2); color:var(--muted); font-weight:600; font-size:0.8rem; text-transform:uppercase; letter-spacing:0.03em;}
+  footer{color:var(--muted); font-size:0.85rem; margin-top:40px; text-align:center;}
+  @media(max-width:600px){ body{padding:24px 14px 60px;} .day{padding:20px 18px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>RL-Based Intrusion Detection Agent</h1>
+  <div class="subtitle">Double DQN + Prioritized Experience Replay on CSE-CIC-IDS2018, in a custom Gymnasium environment</div>
+  <div class="meta-row">
+    <span class="pill">7-day plan</span>
+    <span class="pill">Environment: Kali VM</span>
+    <span class="pill">3 states · 6 actions</span>
+    <span class="pill">γ = 0.90–0.99</span>
+  </div>
+</header>
+
+<div class="env-callout">
+  <b>Working environment:</b> everything below runs on the Kali VM — no GPU dependency, clean Python/CUDA toolchain, easy bulk dataset handling. Use a dedicated virtualenv so this doesn't collide with the malware-analysis-pipeline environment.
+  <pre><code>python3 -m venv ~/venvs/rl-ids
+source ~/venvs/rl-ids/bin/activate
+pip install gymnasium torch numpy pandas scikit-learn matplotlib tqdm</code></pre>
+</div>
+
+<!-- DAY 1 -->
+<div class="day d1">
+  <div class="day-head"><span class="day-num">Day 1</span><h2>Dataset acquisition &amp; preprocessing</h2></div>
+  <p class="day-goal">Goal: a clean, labeled feature table ready to drive the environment.</p>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Download the CSE-CIC-IDS2018 CSVs (AWS CICFlowMeter exports) — start with 2–3 representative days (one benign-heavy, one with DoS/Botnet, one with Infiltration) rather than the full 10-day set, to keep iteration fast.</li>
+    <li>Merge CSVs, drop duplicate headers embedded mid-file (a known IDS2018 quirk), coerce dtypes, drop/clip <code>Inf</code> and <code>NaN</code> rows.</li>
+    <li>Reduce the ~80 CICFlowMeter features down to the state features your MDP actually uses: packet rate, byte count, active connection count, TCP flag distribution, destination port status.</li>
+    <li>Map the dataset's attack labels to your 3 MDP states:
+      <table>
+        <tr><th>Dataset label</th><th>MDP state</th></tr>
+        <tr><td>Benign</td><td>Normal</td></tr>
+        <tr><td>Low-confidence anomalies (port scan, early-stage brute force)</td><td>Suspicious</td></tr>
+        <tr><td>Confirmed attacks (DoS, Botnet, Infiltration, Web-Attack)</td><td>Compromised</td></tr>
+      </table>
+    </li>
+    <li>Keep the attack ground-truth label as a <b>hidden</b> column used only to compute rewards (TP/FP/FN/TN) and for evaluation — never feed it to the agent as an observation (that would leak the answer).</li>
+    <li>Normalize/standardize continuous features; save the cleaned table as Parquet for fast reloading.</li>
+  </ul>
+
+  <div class="checkpoint"><b>Checkpoint:</b> <code>df.isna().sum().sum() == 0</code>, class balance printed, and a 5-row sample manually traced to the correct MDP state.</div>
+</div>
+
+<!-- DAY 2 -->
+<div class="day d2">
+  <div class="day-head"><span class="day-num">Day 2</span><h2>Build the Gymnasium environment</h2></div>
+  <p class="day-goal">Goal: a working <code>gym.Env</code> that reproduces the state/action structure from your MDP slides.</p>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Subclass <code>gymnasium.Env</code>. <code>observation_space</code> = <code>Box</code> over the normalized telemetry features (add Gaussian noise / random masking to simulate "partial and noisy telemetry").</li>
+    <li><code>action_space = Discrete(6)</code>: <code>a0</code> Monitor, <code>a1</code> DPI, <code>a2</code> Throttle, <code>a3</code> Honeypot, <code>a4</code> Block, <code>a5</code> Isolate.</li>
+    <li>Enforce <code>A(s)</code> action masking exactly as specified: Normal→{Monitor}, Suspicious→{Monitor, DPI, Throttle, Honeypot}, Compromised→{Monitor, Block, Isolate}. Invalid actions should either be masked at the policy level or heavily penalized.</li>
+    <li><code>reset()</code> samples a fresh episode start (Normal state, random flow row). <code>step(action)</code> samples the next flow row conditioned on the current state to drive stochastic transitions (attack arrival, escalation, successful mitigation back to Normal).</li>
+    <li>Episode terminates on <code>Isolate</code> (terminal reset per your slide) or after a max step count.</li>
+  </ul>
+
+  <div class="pitfall"><b>Pitfall:</b> don't hand-wave the transition model — the "state" the agent sees should be an observation of the environment's true underlying condition, which itself evolves based on real flow sequences from the dataset, not just randomly re-sampled rows.</div>
+</div>
+
+<!-- DAY 3 -->
+<div class="day d3">
+  <div class="day-head"><span class="day-num">Day 3</span><h2>Reward function</h2></div>
+  <p class="day-goal">Goal: <code>R(s,a) = R_detection − C_action(a) − P_latency(a)</code>, verified against the worked example.</p>
+
+  <h3 class="sec">Reward components</h3>
+  <table>
+    <tr><th>Component</th><th>Values</th></tr>
+    <tr><td>Detection (R_detection)</td><td>TN = +1, TP = +18, FP = −12, FN = −40</td></tr>
+    <tr><td>Action cost (C_action)</td><td>Monitor 0.0, DPI 1.0, Throttle 1.5, Honeypot 3.0, Block 2.0, Isolate 15.0</td></tr>
+    <tr><td>Latency penalty (P_latency)</td><td>α × queue length, applied on DPI/Throttle overuse</td></tr>
+  </table>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Implement reward as a pure function of <code>(true_label, action)</code> so it's independently testable.</li>
+    <li>Unit-test against the worked episode from the slides at γ = 0.9:
+      <pre><code>t=0 Normal·Monitor    R1=0    → Suspicious
+t=1 Suspicious·Throttle R2=-41.5 → Compromised
+t=2 Compromised·Block  R3=-2    → Compromised
+t=3 Compromised·Block  R4=+18   → Normal (terminal)
+
+Backward returns:
+G3 = 18
+G2 = -2 + 0.9*18     = 14.2
+G1 = -41.5 + 0.9*14.2 = -28.72
+G0 = 0.9*(-28.72)     = -25.85</code></pre>
+    </li>
+    <li>If your reward function doesn't reproduce these numbers exactly, fix it before Day 4 — everything downstream depends on this being correct.</li>
+  </ul>
+
+  <div class="checkpoint"><b>Checkpoint:</b> a pytest asserting <code>G0 == -25.85</code> (±1e-6) for the scripted episode above.</div>
+</div>
+
+<!-- DAY 4 -->
+<div class="day d4">
+  <div class="day-head"><span class="day-num">Day 4</span><h2>Tabular sanity check (Monte Carlo control)</h2></div>
+  <p class="day-goal">Goal: confirm the environment converges to the known-correct optimal policy before any neural net is involved.</p>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Implement First-Visit Constant-α GLIE Monte Carlo control directly on the 3-state tabular version of the problem (bucket observations back into {Normal, Suspicious, Compromised}).</li>
+    <li>ε-greedy exploration with ε decaying across episodes (GLIE condition), constant-α update: <code>Q ← Q + α(G − Q)</code>.</li>
+    <li>Train for enough episodes to see Q-values stabilize.</li>
+  </ul>
+
+  <h3 class="sec">Expected result</h3>
+  <table>
+    <tr><th>State</th><th>Optimal action</th><th>q*</th></tr>
+    <tr><td>Normal</td><td>Monitor</td><td>18.29</td></tr>
+    <tr><td>Suspicious</td><td>Honeypot</td><td>28.61</td></tr>
+    <tr><td>Compromised</td><td>Block</td><td>31.06</td></tr>
+  </table>
+
+  <div class="pitfall"><b>Why this step matters:</b> if your tabular agent doesn't converge to this policy, the bug is in your env/reward, not in RL theory. Debugging that here costs minutes; debugging it after Double DQN + PER is wired up costs days.</div>
+</div>
+
+<!-- DAY 5 -->
+<div class="day d5">
+  <div class="day-head"><span class="day-num">Day 5</span><h2>Double DQN</h2></div>
+  <p class="day-goal">Goal: a stably-training deep agent on the full IDS2018-driven environment, using a plain replay buffer first.</p>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Q-network: small MLP (e.g. 2–3 hidden layers, 128–256 units) over the normalized telemetry features → Q-values for all 6 actions.</li>
+    <li>Maintain an online network and a target network; sync via hard update every N steps or soft (Polyak) update with τ ≈ 0.005.</li>
+    <li>Double DQN target: use the <b>online</b> network to select <code>argmax_a' Q(s',a')</code>, and the <b>target</b> network to evaluate that action — this decouples selection from evaluation and fixes DQN's overestimation bias.</li>
+    <li>Standard uniform replay buffer (deque or simple ring buffer) to start — get loss curves and reward trending upward before adding complexity.</li>
+    <li>Apply the action mask from Day 2 at both action-selection and target-computation time.</li>
+  </ul>
+
+  <div class="checkpoint"><b>Checkpoint:</b> training reward curve trending upward over episodes, and greedy-policy evaluation starting to favor Monitor/Honeypot/Block in the matching states.</div>
+</div>
+
+<!-- DAY 6 -->
+<div class="day d6">
+  <div class="day-head"><span class="day-num">Day 6</span><h2>Prioritized Experience Replay</h2></div>
+  <p class="day-goal">Goal: swap in PER without breaking what's already training.</p>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Implement a sum-tree buffer: priority <code>p_i = |TD-error_i|^α</code> (α ≈ 0.6), sampling probability <code>P(i) = p_i / Σp</code>.</li>
+    <li>Importance-sampling weights: <code>w_i = (N · P(i))^(-β)</code>, normalized by <code>max(w)</code>, with β annealed from ~0.4 → 1.0 over training to correct the sampling bias as training progresses.</li>
+    <li>After each gradient step, update the priorities of the sampled transitions with their fresh TD-errors.</li>
+    <li><b>Test the sum-tree in isolation first</b> (insert/sample/update on a toy buffer of 10 items) — leaf-index arithmetic bugs here are the single most common PER bug and are miserable to debug inside a full training loop.</li>
+  </ul>
+
+  <div class="pitfall"><b>Pitfall:</b> forgetting to multiply the TD-error loss by the IS weight (or forgetting to normalize weights by their max) silently reintroduces the bias PER is meant to correct — the agent will still "train" but converge to a worse policy without any crash to warn you.</div>
+</div>
+
+<!-- DAY 7 -->
+<div class="day d7">
+  <div class="day-head"><span class="day-num">Day 7</span><h2>Train, evaluate, write up</h2></div>
+  <p class="day-goal">Goal: a trained policy with numbers to back the "Double DQN + PER beats baselines" claim.</p>
+
+  <h3 class="sec">Tasks</h3>
+  <ul class="tasks">
+    <li>Full training run with ε-greedy decay (e.g. 1.0 → 0.05 over the first 60–70% of episodes).</li>
+    <li>Evaluate the greedy policy on held-out IDS2018 data (a day/attack type not used in training) and report:
+      <ul>
+        <li>Detection rate / false-positive rate per state</li>
+        <li>Average episode return</li>
+        <li>Action-usage distribution per state (does it actually learn Monitor/Honeypot/Block?)</li>
+      </ul>
+    </li>
+    <li>Compare against the baselines already computed in your slides: passive (always-Monitor), stochastic policy, and the tabular MC optimum — quantify the gap closed by Double DQN+PER.</li>
+    <li>Plot training reward curve, loss curve, and a confusion-style matrix of (true state × action taken).</li>
+    <li>Write up results: MDP formulation recap, architecture, training curves, baseline comparison, limitations (e.g. partial observability, dataset class imbalance).</li>
+  </ul>
+
+  <div class="checkpoint"><b>Deliverables:</b> trained model checkpoint, evaluation script, plots, and a short report tying the numbers back to the MDP theory from your slides.</div>
+</div>
+
+<footer>RL-Based Intrusion Detection Agent — 7-day build plan</footer>
+</div>
+</body>
+</html>
