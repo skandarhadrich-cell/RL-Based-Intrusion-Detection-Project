@@ -95,6 +95,11 @@ def main() -> None:
     add("## 1. Setup\n")
     add(f"- World: 3-state tabular bucketing of `IDSEnv2018` (agent uses "
         f"`info[\"mdp_state\"]` - perfect state perception).")
+    add("- Train table: the merged CSE-CIC-IDS2018 + CIC-IDS2017 split "
+        "(`train.parquet`, hidden `source_dataset` provenance). The tabular "
+        "agent consumes only `info[\"mdp_state\"]` and the reward, so the "
+        "learned policy is independent of the observation pool - this run "
+        "re-checks the env/reward on the merged data.")
     add(f"- Algorithm: **First-Visit Constant-α GLIE Monte Carlo control**.")
     add(f"- γ = {C.GAMMA}, α = {ALPHA}, ε_t = 1/(1 + t/{EPS_DIVISOR:g}) (ends at "
         f"ε = {track['eps'][-1]:.4f}).")

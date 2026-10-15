@@ -5,6 +5,7 @@
 ## 1. Setup
 
 - World: 3-state tabular bucketing of `IDSEnv2018` (agent uses `info["mdp_state"]` - perfect state perception).
+- Train table: the merged CSE-CIC-IDS2018 + CIC-IDS2017 split (`train.parquet`, hidden `source_dataset` provenance). The tabular agent consumes only `info["mdp_state"]` and the reward, so the learned policy is independent of the observation pool - this run re-checks the env/reward on the merged data.
 - Algorithm: **First-Visit Constant-α GLIE Monte Carlo control**.
 - γ = 0.9, α = 0.05, ε_t = 1/(1 + t/1000) (ends at ε = 0.0244).
 - Explore-starts: each episode begins uniformly over {Normal, Suspicious, Compromised} (an eps-greedy run starting only at Normal would reach Suspicious ~3% of episodes and starve it).
