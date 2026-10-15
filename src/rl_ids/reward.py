@@ -1,6 +1,6 @@
-"""Pure reward model for the RL-IDS MDP (Day 3 component, used by the Day-2 env).
+"""Pure reward model for the RL-IDS MDP (used by the Gymnasium environment).
 
-R(s,a) = R_detection - C_action(a) - P_latency(a),  per the plan:
+R(s,a) = R_detection - C_action(a) - P_latency(a):
 
     R_detection : confusion-matrix payoff of the decision (TN +1, TP +18,
                   FP -12, FN -40; 'NONE' = 0 for pure-monitor steps).
@@ -135,7 +135,7 @@ def scripted_detection_events(
 
 
 # --------------------------------------------------------------------------- #
-# Day 3: explicit R(s,a) = R_detection - C_action(a) - P_latency(a) components
+# Explicit R(s,a) = R_detection - C_action(a) - P_latency(a) components
 # --------------------------------------------------------------------------- #
 def detection_payoff(event: str) -> float:
     """R_detection for a confusion-matrix event ('TN','TP','FP','FN','NONE')."""

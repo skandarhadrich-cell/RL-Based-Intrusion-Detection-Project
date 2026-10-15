@@ -1,13 +1,13 @@
-# Day 1 — Dataset acquisition & preprocessing
+# Dataset acquisition & preprocessing
 
-**Goal:** a clean, labeled feature table (zero NaNs/Infs) ready to drive the Gymnasium environment (Day 2+).
+**Goal:** a clean, labeled feature table (zero NaNs/Infs) ready to drive the Gymnasium environment.
 
 **Status: DONE** — all 10 checkpoint tests pass on the full 10-day dataset.
 
 > **Extension (this revision):** CIC-IDS2017 is integrated as a **second training
 > source** (controlled data-source experiment). See
-> [Day-1 extension — CIC-IDS2017 integration](#day-1-extension--cic-ids2017-integration).
-> The 2018-only pipeline above is preserved byte-for-byte as the Day-7 baseline
+> [CIC-IDS2017 integration](#cic-ids2017-integration).
+> The 2018-only pipeline above is preserved byte-for-byte as the A/B baseline
 > (`train_ids2018_only.parquet`, `scaler_ids2018_baseline.json`).
 
 ---
@@ -15,7 +15,7 @@
 ## What was done
 
 1. **Acquisition** — downloaded all 10 CSE-CIC-IDS2018 CICFlowMeter CSVs (~6.9 GB) from AWS S3 with
-   a resume-safe script (`download.sh`). Tuesday-20-02 is the 84-column variant (extra
+   a resume-safe script (`download_ids2018.sh`). Tuesday-20-02 is the 84-column variant (extra
    `Flow ID / Src IP / Dst IP / Src Port`); Wednesday-14-02 etc. are the 80-column variant.
    Reading by column *name* (`usecols`) makes the schema difference a non-issue.
 
@@ -51,7 +51,7 @@
    **eval-only**; `StandardScaler` is fit on the *train split only* and saved to
    `scaler.json` (verified: train obs are exactly z-scored).
 
-## Results
+## Results (original 2018-only pipeline)
 
 | Split | Days | Rows |
 |---|---|---|
@@ -97,24 +97,24 @@ and SQLi rows are few (611/230/87) but present.
 ## Artifacts
 
 - `data/raw/*.csv` (10 files, ~6.9 GB) — raw CICFlowMeter exports
-- `data/processed/train.parquet` (15.2 M rows), `holdout_infiltration.parquet` (935 k)
-- `data/processed/scaler.json` — z-score params fit on train only
+- `data/processed/train.parquet` (16.7 M merged rows), `holdout_infiltration.parquet` (701 k)
+- `data/processed/scaler.json` — z-score params fit on the merged train split only
 - `Dataset preprocessing Report.md` (repo root) — auto-generated pipeline report
-- `src/rl_ids/{config.py, preprocess.py}` · `tests/test_day1.py` · `download.sh`
+- `src/rl_ids/{config.py, preprocess.py}` · `tests/test_dataset_preprocessing.py` · `download_ids2018.sh`
 
 ## How to run
 
 ```bash
 ~/venvs/rl-ids/bin/python -m rl_ids.preprocess     # rebuild everything
-~/venvs/rl-ids/bin/python -m pytest tests/test_day1.py -v
+~/venvs/rl-ids/bin/python -m pytest tests/test_dataset_preprocessing.py -v
 ```
 
 ---
 
-## Day-1 extension — CIC-IDS2017 integration
+## CIC-IDS2017 integration
 
 **Goal:** add CIC-IDS2017 as a *second training source* without changing the
-17-feature observation schema, then (Day 7) A/B the original 2018-only model
+17-feature observation schema, then A/B the original 2018-only model
 against the merged-data model on identical, untouched eval sets.
 
 ### 1. Why the `TrafficLabelling` archive (not `MachineLearningCVE`)
@@ -139,7 +139,7 @@ timestamp mask: valid 170,366 = MachineLearningCVE count).
 
 2017 column names are mapped onto the canonical schema (`config.IDS2017_RENAMES`);
 every canonical raw column is producible from a 2017 header. Parity is verified on
-raw data by `tests/test_day1_ids2017.py::test_recomputed_rates_match_2017_shipped_rates`:
+raw data by `tests/test_ids2017_integration.py::test_recomputed_rates_match_2017_shipped_rates`:
 our recomputed `Flow Pkts/s` / `Flow Byts/s` (from `Total Fwd+Bwd Packets` /
 `TotLen Fwd+Bwd` ÷ `Flow Duration` in seconds) reproduce the rate columns
 CIC-IDS2017 **ships itself** with median relative error < 1% and correlation > 0.999
@@ -172,7 +172,7 @@ rate recomputation are unchanged.
 
 > Note: the drop applies to **every** file, holdout files included, so the 2018
 > Infiltration holdout shrank 935,083 → **701,039** rows (same two days, never
-> trained on, never scaler-fit). Both Day-7 arms are evaluated on this *same*
+> trained on, never scaler-fit). Both A/B arms are evaluated on this *same*
 > holdout, so the A/B remains fair.
 
 ### 5. Splits (eval-only, never trained on, never scaler-fit)
@@ -219,13 +219,13 @@ reward/eval-only and excluded from `OBS_FEATURES`.
 - `scaler.json` — refit on the **merged train only** (both sources; all holdout days
   excluded); applied to train and both holdouts.
 - `scaler_ids2018_baseline.json` — archived copy of the original 2018-only scaler,
-  used by the Day-7 baseline arm.
+  used by the baseline arm.
 
 ### 9. Tests
 
-- `tests/test_day1.py` — refactored `test_holdout_isolation` for two holdouts +
-  `test_merged_provenance` + provenance in the leakage guard.
-- `tests/test_day1_ids2017.py` — 2017 holdout content/isolation, observation-schema
+- `tests/test_dataset_preprocessing.py` — refactored `test_holdout_isolation` for two
+  holdouts + `test_merged_provenance` + provenance in the leakage guard.
+- `tests/test_ids2017_integration.py` — 2017 holdout content/isolation, observation-schema
   invariance, derived-vs-zero-filled `Active Conn Cnt`, canonical-column coverage,
   shipped-rate parity, and the full 2017 label→state policy.
 
@@ -241,4 +241,4 @@ PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.preprocess
 ```
 
 ---
-*Next: Day 2 — Gymnasium environment (`docs/day2.md`).*
+*Next: the Gymnasium environment (`docs/environment.md`).*

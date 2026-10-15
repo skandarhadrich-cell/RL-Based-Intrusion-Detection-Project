@@ -1,10 +1,10 @@
-"""Day 4: First-Visit Constant-α GLIE Monte Carlo control (tabular world).
+"""First-Visit Constant-α GLIE Monte Carlo control (tabular world).
 
-Validates the Day-2 environment / Day-3 reward on the 3-state tabular version
+Validates the environment / reward model on the 3-state tabular version
 of the problem BEFORE any neural net is involved.  The agent's "state" is the
 true hidden bucket (info["mdp_state"]) - the tabular sanity check assumes
 perfect state perception so that any discrepancy is blamed on the env/reward
-model, exactly as the plan's pitfall intends.
+model rather than on perception.
 
     Q(s,a) <- Q(s,a) + alpha * (G_t - Q(s,a))      [first visit of (s,a)]
     eps_t  <- 1 / (1 + t / d)                       [GLIE, eps -> 0]

@@ -1,4 +1,4 @@
-# Day 3 report - reward function
+# Reward function - verification report
 
 Discount factor `gamma = 0.9`.
 

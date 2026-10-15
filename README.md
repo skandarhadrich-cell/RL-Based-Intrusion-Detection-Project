@@ -1,14 +1,19 @@
-# 🛡️ DQN Intrusion Detection Agent — Autonomous Cybersecurity Defense System
+# 🛡️ RL-Based Intrusion Detection — DQN Agent
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python" />
   <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=for-the-badge&logo=pytorch" />
-  <img src="https://img.shields.io/badge/Gymnasium-0.29-green?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Dataset-CIC--IDS2017-orange?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/License-MIT-lightgrey?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Gymnasium-1.x-green?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Dataset-CSE--CIC--IDS2018%20%2B%20CIC--IDS2017-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Status-DQN%20phase-yellow?style=for-the-badge" />
 </p>
 
-> An autonomous, real-time network intrusion detection and response system powered by a **Deep Q-Network (DQN)** agent trained via **Temporal Difference (TD) learning** inside a custom **Gymnasium** environment — no signatures, no human intervention.
+> An autonomous network intrusion-detection and response agent trained with
+> value-based reinforcement learning — a **tabular Monte-Carlo control**
+> sanity check first, then **Double DQN + Prioritized Experience Replay** —
+> inside a custom **Gymnasium** environment. Telemetry comes from
+> **CSE-CIC-IDS2018** and **CIC-IDS2017**; the attack ground-truth label is used
+> **only for the reward and for evaluation**, never as an observation.
 
 ---
 
@@ -16,254 +21,232 @@
 
 - [Overview](#-overview)
 - [MDP Formulation](#-mdp-formulation)
-- [System Architecture](#-system-architecture)
 - [State Space](#-state-space-s)
 - [Action Space](#-action-space-a)
 - [Reward Function](#-reward-function-r)
-- [DQN Design](#-dqn-design)
-- [Experience Replay](#-experience-replay-buffer)
 - [Environment](#-custom-gymnasium-environment)
-- [Dataset](#-dataset--cic-ids2017)
+- [Datasets](#-datasets)
 - [Project Structure](#-project-structure)
 - [Installation](#-installation)
 - [Usage](#-usage)
-- [Training](#-training)
-- [Results](#-results)
-- [Comparison](#-comparison-vs-signature-based-ids)
+- [Phase Status & Docs](#-phase-status--docs)
+- [Results So Far](#-results-so-far)
+- [Roadmap](#-roadmap)
 - [Course Objectives](#-course-objectives)
-- [Contributing](#-contributing)
-- [License](#-license)
 
 ---
 
 ## 🔍 Overview
 
-Traditional Intrusion Detection Systems (IDS) rely on static, signature-based rules that fail against novel, adaptive, or zero-day threats. This project replaces them with a **self-learning DQN agent** that continuously observes live network telemetry, reasons about threat severity, and autonomously executes defensive countermeasures — all without a human in the loop.
+Signature-based IDS rely on static rules that fail against novel or adaptive
+threats. This project replaces the rule set with a **self-learning agent** that
+observes real network-flow telemetry, infers the likely severity of the
+current traffic, and selects a defensive action from a fixed incident-response
+playbook.
 
-The system is grounded in the mathematical framework of **Reinforcement Learning (RL)**, specifically **value-based Deep Q-Learning**, making it both theoretically rigorous and practically deployable on real network topologies.
+The agent is built incrementally and each stage is verified against an exact
+reference before the next one is added:
+
+1. **Preprocessing** — turn raw CICFlowMeter CSVs into a clean, z-scored,
+   labeled feature table (zero NaN/Inf), with explicit train/holdout splits.
+2. **Environment** — a custom `gym.Env` with partial observability (noise +
+   telemetry masking) whose transitions are grounded in the real data.
+3. **Reward function** — a pure, stateless `R(s, a, s')` with confusion-matrix
+   payoffs and operating costs.
+4. **Tabular sanity check** — first-visit Monte-Carlo control on a 3-state
+   abstraction, checked against the exact Bellman solution.
+5. **Deep RL** — **Double DQN** with a target network, then **Prioritized
+   Experience Replay**.
+
+Everything is organized so a single label→state mapping, feature list, and
+transition/reward model are the only sources of truth.
 
 ---
 
 ## 🧮 MDP Formulation
 
-The defense problem is cast as a finite **Markov Decision Process** defined by the tuple:
+The defense problem is cast as a finite **Markov Decision Process**:
 
 $$\mathcal{M} = (S,\ A,\ P,\ R,\ \gamma)$$
 
 | Symbol | Description |
 |--------|-------------|
-| $S$ | Continuous state space of network telemetry vectors |
-| $A$ | Discrete action space of defensive countermeasures |
-| $P$ | Stochastic transition function $P(s' \mid s, a)$ |
-| $R$ | Scalar reward signal $R(s, a, s')$ |
-| $\gamma$ | Discount factor controlling future reward weight |
+| $S$ | 17-dimensional continuous observation vector (partially observable telemetry) |
+| $A$ | 6 discrete incident-response actions |
+| $P$ | Stochastic transition function $P(s' \mid s, a)$ over the hidden 3-state MDP |
+| $R$ | Scalar reward $R(s, a, s')$ = detection payoff − action cost − latency penalty |
+| $\gamma$ | Discount factor, $\gamma = 0.9$ |
 
-The agent seeks an optimal policy $\pi^*$ that maximises the expected discounted cumulative return:
+The agent maximises the expected discounted return
+$G_t = \sum_{k=0}^{\infty} \gamma^k R_{t+k+1}$.
 
-$$G_t = \sum_{k=0}^{\infty} \gamma^k R_{t+k+1}$$
-
----
-
-## 🏗️ System Architecture
-
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                      LIVE NETWORK INFRASTRUCTURE                     │
-│        Packet Flows · TCP Flags · Port Metrics · Conn. Duration      │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │ Raw Telemetry
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                     TELEMETRY PREPROCESSOR                           │
-│         Feature Extraction → Normalisation → State Vector s ∈ S     │
-└────────────────────────────┬─────────────────────────────────────────┘
-                             │ s_t
-                             ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                   CUSTOM GYMNASIUM ENVIRONMENT                       │
-│     Normal ◄──────────────────────────────────► Compromised         │
-│                       Suspicious                                     │
-└───────────┬──────────────────────────────────────────────────────────┘
-            │ (s, a, r, s', done)
-            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                EXPERIENCE REPLAY BUFFER  (capacity N)               │
-│                D = {(s, a, r, s', done) ...}                        │
-└───────────┬──────────────────────────────────────────────────────────┘
-            │ mini-batch B ~ D
-            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                   DEEP Q-NETWORK (DQN AGENT)                        │
-│                                                                      │
-│   Online Net  Q(s,a;θ)  ──── TD Target ──── Target Net  Q(s',a;θ⁻) │
-│                                                                      │
-│   Loss: L(θ) = E[(r + γ max Q(s',a';θ⁻) − Q(s,a;θ))²]            │
-└───────────┬──────────────────────────────────────────────────────────┘
-            │ argmax_a Q(s,a;θ)
-            ▼
-┌──────────────────────────────────────────────────────────────────────┐
-│                         ACTION EXECUTION                             │
-│   Monitor │ Throttle Bandwidth │ Log Threat │ Isolate Host          │
-└──────────────────────────────────────────────────────────────────────┘
-```
+The **true** MDP state (the severity bucket) is hidden; the agent only sees a
+noisy, incomplete observation of one real flow. The hidden state is exposed in
+`info` **for reward computation and evaluation only**.
 
 ---
 
 ## 📡 State Space $S$
 
-Each state $s \in S$ is a structured real-valued vector assembled from live network telemetry:
+Each observation is a `Box(17,)` vector: 17 normalized CICFlowMeter features of
+one real flow, corrupted by Gaussian noise ($\sigma = 0.05$) and random
+"missing telemetry" masking (per-feature probability $0.1$).
 
-| Feature | Description |
-|---------|-------------|
-| `pkt_flow_vol` | Packets per second on monitored segment |
-| `byte_flow_rate` | Bytes/sec — distinguishes flood from scan |
-| `tcp_syn_count` | SYN flag count (DDoS/SYN-flood indicator) |
-| `tcp_fin_count` | FIN flag count (teardown anomaly) |
-| `conn_duration_mean` | Mean connection lifetime (ms) |
-| `active_port_count` | Number of distinct destination ports contacted |
-| `failed_conn_ratio` | Ratio of refused / timed-out connections |
-| `payload_entropy` | Shannon entropy of packet payloads |
-| `system_state_label` | Encoded: `0` = Normal, `1` = Suspicious, `2` = Compromised |
+| Group | Features |
+|-------|----------|
+| Packet rate | `Flow Pkts/s`, `Fwd Pkts/s`, `Bwd Pkts/s` |
+| Byte count / rate | `Flow Byts/s`, `TotLen Fwd Pkts`, `TotLen Bwd Pkts` |
+| Concurrency (derived) | `Active Conn Cnt` |
+| Flow context | `Flow Duration`, `Pkt Len Mean` |
+| TCP flags | `FIN`, `SYN`, `RST`, `PSH`, `ACK`, `URG` flag counts |
+| Context | `Dst Port Bucket`, `Protocol` |
 
-> Features are min-max normalised before being passed to the network.
+> `Active Conn Cnt` is **derived** (a sweep-line count of flows concurrent at
+> each flow's start), not a shipped column — the same derivation is used for
+> both datasets.
+
+The hidden columns — `attack_label`, `mdp_state`, `TimestampEpoch`, `source_day`,
+`source_dataset` — are kept for reward/evaluation and **never** fed to the agent.
 
 ---
 
 ## 🎮 Action Space $A$
 
-The agent selects from **4 discrete defensive actions**:
+The agent selects from **6 discrete defensive actions** of the IR playbook, each
+with an operating cost:
 
-| ID | Action | Description |
-|----|--------|-------------|
-| `0` | **Passive Monitor** | Observe and collect telemetry; no intervention |
-| `1` | **Bandwidth Throttle** | Rate-limit suspicious traffic flows |
-| `2` | **Threat Log** | Flag and record the event for forensic analysis |
-| `3` | **Host Isolation** | Sever the compromised endpoint from the network |
+| ID | Action | Description | Cost |
+|----|--------|-------------|-----:|
+| `0` | **Monitor** | Observe only; no intervention | 0.0 |
+| `1` | **DPI** | Deep-packet inspection | 1.0 |
+| `2` | **Throttle** | Rate-limit the flow | 1.5 |
+| `3` | **Honeypot** | Lure the flow into a decoy | 3.0 |
+| `4` | **Block** | Drop the flow | 2.0 |
+| `5` | **Isolate** | Hard quarantine (terminal) | 15.0 |
+
+A **playbook mask** restricts which actions are legal per hidden state; illegal
+actions are never offered to the policy and are penalised (`−100`) if taken
+anyway.
+
+| Hidden state | Allowed actions |
+|--------------|-----------------|
+| Normal | Monitor |
+| Suspicious | Monitor, DPI, Throttle, Honeypot |
+| Compromised | Monitor, Block, Isolate |
 
 ---
 
 ## 🏆 Reward Function $R$
 
-The scalar reward balances containment efficacy against operational disruption:
+The reward is a pure, stateless function:
 
-$$R(s, a, s') = \begin{cases} +10 & \text{Threat successfully contained (correct isolation/log)} \\ +5 & \text{Bandwidth throttle — threat mitigated, no service loss} \\ -5 & \text{False positive — legitimate traffic disrupted} \\ -20 & \text{Breach allowed — system compromised unmitigated} \end{cases}$$
+$$R(s,a,s') = R_{\text{detection}}(\text{event}) - C_{\text{action}}(a) - P_{\text{latency}}(a)$$
 
-This asymmetric structure incentivises the agent to act decisively against real threats while remaining conservative toward benign traffic.
+**Detection payoff** (confusion-matrix event):
 
----
+| Event | Value | Meaning |
+|-------|------:|---------|
+| TP | +18 | attack detected and resolved |
+| TN | +1 | benign flow, light touch |
+| FP | −12 | heavy action wasted on benign traffic |
+| FN | −40 | attack slipped through / escalated |
+| NONE | 0 | pure-monitor step |
 
-## 🧠 DQN Design
+**Latency penalty** — sustained DPI/Throttle use is billed
+$P_{\text{latency}} = \alpha \cdot \max(0, \text{run} - 1)$ with
+$\alpha = 0.25$, where `run` is the number of consecutive DPI/Throttle steps.
 
-The agent extends classical Q-learning by approximating the optimal action-value function with a neural network:
-
-$$Q^*(s, a) = \mathbb{E}\left[R_{t+1} + \gamma \max_{a'} Q^*(s_{t+1}, a') \mid s_t = s,\ a_t = a\right]$$
-
-### Network Architecture
-
-```
-Input Layer        →  [ state_dim ]   e.g. 9 features
-Hidden Layer 1     →  256 neurons, ReLU
-Hidden Layer 2     →  128 neurons, ReLU
-Hidden Layer 3     →  64  neurons, ReLU
-Output Layer       →  [ |A| = 4 ]    Q-value per action (linear)
-```
-
-### Training Mechanics
-
-| Component | Detail |
-|-----------|--------|
-| **Optimizer** | Adam, lr = `1e-3` |
-| **Loss** | Huber Loss (smooth L1) |
-| **Exploration** | ε-greedy: ε decays from `1.0` → `0.01` |
-| **Discount factor** | γ = `0.99` |
-| **Replay buffer** | Capacity = `100 000` transitions |
-| **Batch size** | `64` |
-| **Target net update** | Hard copy every `1 000` steps |
-
----
-
-## 💾 Experience Replay Buffer
-
-To break temporal correlations and achieve **sample-efficient off-policy learning**, every transition tuple is stored in a circular replay buffer:
-
-$$\mathcal{D} = \{(s_t,\ a_t,\ r_t,\ s_{t+1},\ \text{done}_t)\}_{t=1}^{N}$$
-
-Mini-batches $\mathcal{B} \sim \mathcal{D}$ are drawn uniformly at training time. The TD target used to update the online network is:
-
-$$y_t = r_t + \gamma \max_{a'} Q(s_{t+1}, a';\ \theta^-)$$
-
-where $\theta^-$ are the **frozen target network** weights.
+The env bills latency through the same pure-function component, so online
+training rewards and offline replay agree step-for-step.
 
 ---
 
 ## 🌐 Custom Gymnasium Environment
 
-The environment simulates a monitored network segment with stochastic threat injection.
+`src/rl_ids/env.py` implements `IDSEnv2018`. `reset()` starts in the Normal
+state; an episode ends when the hidden state resolves, when the agent
+**Isolates**, or at `max_steps` (default 100). Next observations are always
+**real flow rows** drawn from the pool matching the sampled next state — never
+synthetic vectors.
 
 ```python
-class NetworkEnv(gym.Env):
-    observation_space = Box(low=0, high=1, shape=(STATE_DIM,), dtype=np.float32)
-    action_space      = Discrete(4)   # Monitor, Throttle, Log, Isolate
+from rl_ids.env import IDSEnv2018
 
-    def step(self, action) -> (obs, reward, terminated, truncated, info): ...
-    def reset(self)        -> (obs, info): ...
+env = IDSEnv2018(seed=1)
+obs, info = env.reset(seed=1)
+print(obs.shape, info["action_mask"])   # (17,)  [True, False, ...]
+obs, r, terminated, truncated, info = env.step(0)   # Monitor
 ```
 
-**State transitions** follow a probabilistic model:
-
-```
-Normal      →  Suspicious   (p = 0.15 per step, threat injection)
-Suspicious  →  Compromised  (p = 0.40 if no action taken)
-Suspicious  →  Normal       (p = 0.60 if correct action taken)
-Compromised →  Normal       (p = 0.70 on successful isolation)
-```
+Transitions are stochastic and dataset-grounded (`config.TRANSITIONS`); an
+empirical flow-sequence matrix (`env.empirical_state_transitions`) is also
+available for realism sweeps.
 
 ---
 
-## 📦 Dataset — CIC-IDS2017
+## 📦 Datasets
 
-Training and offline evaluation use the **Canadian Institute for Cybersecurity IDS 2017** dataset:
+Training and offline evaluation use two Canadian Institute for Cybersecurity
+datasets, merged into **one 17-feature schema** (identical meaning and units).
 
-| Attribute | Value |
-|-----------|-------|
-| Source | [cicids.ca](https://www.unb.ca/cic/datasets/ids-2017.html) |
-| Traffic types | Benign + 14 attack categories |
-| Total records | ~2.8 million flows |
-| Key features used | Flow duration, packet lengths, flag counts, IAT statistics |
+| Dataset | Source | Role | Merged train rows |
+|---------|--------|------|------------------:|
+| **CSE-CIC-IDS2018** | AWS S3 CICFlowMeter export (10 CSVs, ~6.9 GB) | primary training source | 14,650,066 |
+| **CIC-IDS2017** | `GeneratedLabelledFlows` / *TrafficLabelling* archive | second training source (data-source experiment) | 2,098,059 |
+| **Merged train** | — | used to fit the scaler and (later) the agent | **16,748,125** |
 
-Attack categories include: DoS, DDoS, PortScan, Brute Force, Web Attacks, Infiltration, and Botnet.
+**Eval-only holdouts** (never trained on, never scaler-fit):
+
+| Split | Rows | Days |
+|-------|-----:|------|
+| `holdout_infiltration` (2018) | 701,039 | Wed-28-02, Thu-01-03 (Infiltration) |
+| `holdout_ids2017_portscan_ddos` (2017) | 346,574 | Fri Afternoon PortScan + DDoS |
+
+The pre-merge **2018-only** artifacts (`train_ids2018_only.parquet`,
+`scaler_ids2018_baseline.json`) are archived so the trained-on-2018-only model
+can be A/B-compared against the merged-data model on identical holdouts.
+
+Full methodology, feature-parity checks and caveats:
+[`docs/dataset_preprocessing.md`](docs/dataset_preprocessing.md) and the
+generated [`Dataset preprocessing Report.md`](Dataset%20preprocessing%20Report.md).
 
 ---
 
 ## 📁 Project Structure
 
 ```
-dqn-ids-agent/
+RL-Based-Intrusion-Detection-Project/
 │
-├── env/
-│   ├── network_env.py          # Custom Gymnasium environment
-│   └── state_builder.py        # Telemetry → state vector pipeline
+├── src/rl_ids/
+│   ├── config.py            # single source of truth: paths, features, labels, MDP
+│   ├── preprocess.py        # raw CSVs -> labeled, normalized Parquet + report
+│   ├── inspect_source.py    # pre-integration raw-CSV inspection tool
+│   ├── env.py               # IDSEnv2018 (Gymnasium environment)
+│   ├── reward.py            # pure reward model + event classification
+│   ├── tabular.py           # first-visit MC control + exact Bellman solver
+│   ├── train_tabular.py     # tabular sanity-check driver (report + curve)
+│   └── validate_reward.py   # reward verification report + replay check
 │
-├── agent/
-│   ├── dqn_agent.py            # DQN agent (ε-greedy, target net, train step)
-│   ├── replay_buffer.py        # Experience replay circular buffer
-│   └── network.py              # PyTorch Q-network definition
+├── tests/                   # pytest suite (88 tests)
+│   ├── test_dataset_preprocessing.py
+│   ├── test_ids2017_integration.py
+│   ├── test_environment.py
+│   ├── test_reward_function.py
+│   └── test_tabular_mc_control.py
+│
+├── docs/
+│   ├── dataset_preprocessing.md   # acquisition, cleaning, merge, splits
+│   ├── environment.md             # MDP, transitions, observation model
+│   ├── reward_function.md         # reward design + worked example
+│   └── tabular_mc_control.md      # MC control vs exact Bellman solution
 │
 ├── data/
-│   ├── preprocess.py           # CIC-IDS2017 feature extraction & normalisation
-│   └── loader.py               # Dataset loader for offline training
+│   ├── raw/                 # downloaded CSVs (git-ignored)
+│   └── processed/           # Parquet splits, scaler.json, generated reports
 │
-├── train.py                    # Main training loop
-├── evaluate.py                 # Policy evaluation & metrics
-├── visualise.py                # Reward curves, Q-value plots, confusion matrix
-│
-├── configs/
-│   └── default.yaml            # Hyperparameters & environment settings
-│
-├── checkpoints/                # Saved model weights
-├── logs/                       # TensorBoard training logs
-│
-├── requirements.txt
+├── download_ids2018.sh      # fetch CSE-CIC-IDS2018 CSVs
+├── download_ids2017.sh      # fetch + unpack CIC-IDS2017 archives
+├── Dataset preprocessing Report.md   # auto-generated pipeline report
 └── README.md
 ```
 
@@ -274,158 +257,142 @@ dqn-ids-agent/
 ### Prerequisites
 
 - Python 3.10+
-- CUDA-capable GPU (recommended) or CPU
+- A CUDA-capable GPU (recommended for the DQN phase) or CPU
 
 ### Setup
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/skandarhadrich-cell/dqn-ids-agent.git
-cd dqn-ids-agent
+git clone git@github.com:skandarhadrich-cell/RL-Based-Intrusion-Detection-Project.git
+cd RL-Based-Intrusion-Detection-Project
 
 # 2. Create and activate a virtual environment
 python -m venv venv
 source venv/bin/activate        # Linux / macOS
-venv\Scripts\activate           # Windows
+# venv\Scripts\activate         # Windows
 
 # 3. Install dependencies
 pip install -r requirements.txt
 ```
 
-### requirements.txt (core)
+### `requirements.txt` (core)
 
 ```
 torch>=2.0.0
-gymnasium>=0.29.0
+gymnasium>=1.0.0
 numpy>=1.24.0
 pandas>=2.0.0
+pyarrow>=14.0.0
 scikit-learn>=1.3.0
 matplotlib>=3.7.0
-tensorboard>=2.13.0
-pyyaml>=6.0
+tabulate>=0.9.0
+pytest>=7.4.0
 ```
 
 ---
 
 ## 🚀 Usage
 
-### Download & Preprocess Dataset
+### 1. Download the raw data
 
 ```bash
-# Place raw CIC-IDS2017 CSVs in data/raw/
-python data/preprocess.py --input data/raw/ --output data/processed/
+./download_ids2018.sh     # 10 CSE-CIC-IDS2018 CSVs  -> data/raw/
+./download_ids2017.sh     # CIC-IDS2017 archives       -> data/raw/ids2017/
 ```
 
-### Train the Agent
+### 2. Preprocess (build the merged train/holdout sets + scaler)
 
 ```bash
-python train.py --config configs/default.yaml
+PYTHONPATH=src python -m rl_ids.preprocess
 ```
 
-Key CLI flags:
+This writes `data/processed/{train,holdout_infiltration,holdout_ids2017_portscan_ddos}.parquet`,
+`scaler.json`, the archived 2018-only baseline, and regenerates
+`Dataset preprocessing Report.md`.
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--episodes` | `2000` | Number of training episodes |
-| `--batch-size` | `64` | Replay buffer sample size |
-| `--gamma` | `0.99` | Discount factor |
-| `--eps-start` | `1.0` | Initial exploration rate |
-| `--eps-end` | `0.01` | Minimum exploration rate |
-| `--eps-decay` | `0.995` | Per-episode epsilon decay |
-| `--target-update` | `1000` | Target network hard-copy interval (steps) |
-| `--checkpoint` | `checkpoints/` | Where to save model weights |
-
-### Evaluate a Trained Policy
+### 3. Verify the reward model
 
 ```bash
-python evaluate.py --checkpoint checkpoints/dqn_best.pt --episodes 200
+PYTHONPATH=src python -m rl_ids.validate_reward   # -> reward_function_report.md
 ```
 
-### Visualise Training
+### 4. Run the tabular sanity check
 
 ```bash
-tensorboard --logdir logs/
+PYTHONPATH=src python -m rl_ids.train_tabular     # -> tabular_mc_control_report.md + curve
 ```
+
+### 5. Run the test suite
+
+```bash
+python -m pytest tests/ -q
+```
+
+*(In this working copy the project uses a dedicated venv at `~/venvs/rl-ids`;
+replace `python` with its interpreter if needed.)*
 
 ---
 
-## 📊 Results
+## 📚 Phase Status & Docs
 
-> Results obtained after 2 000 training episodes on CIC-IDS2017 + custom Gymnasium environment.
-
-| Metric | Value |
-|--------|-------|
-| Mean episode reward (last 100 eps) | **+187.4** |
-| Detection Rate (True Positive Rate) | **96.8 %** |
-| False Positive Rate | **3.2 %** |
-| Mean response latency | **< 50 ms** |
-| Breach-allowed rate (−20 penalty events) | **1.1 %** |
-
-**Reward convergence curve:**
-
-```
-Episode Reward
-     ↑
- 200 │                                   ████████████████
- 150 │                         ██████████
- 100 │               ████████
-  50 │     ████████
-   0 │█████
- -50 │
-     └─────────────────────────────────────────────────→ Episodes
-       0       500      1000      1500      2000
-```
+| Phase | Status | Doc |
+|-------|--------|-----|
+| Dataset acquisition & preprocessing | ✅ done | [`docs/dataset_preprocessing.md`](docs/dataset_preprocessing.md) |
+| Gymnasium environment | ✅ done | [`docs/environment.md`](docs/environment.md) |
+| Reward function | ✅ done | [`docs/reward_function.md`](docs/reward_function.md) |
+| Tabular MC sanity check | ✅ done | [`docs/tabular_mc_control.md`](docs/tabular_mc_control.md) |
+| Double DQN | ⏳ in progress | — |
+| Prioritized Experience Replay | ⏳ planned | — |
+| 2018-only vs merged-data A/B | ⏳ planned | — |
 
 ---
 
-## ⚖️ Comparison vs Signature-Based IDS
+## 📊 Results So Far
 
-| Capability | Signature-Based IDS | DQN Agent (This Work) |
-|------------|--------------------|-----------------------|
-| Zero-day threat detection | ❌ | ✅ |
-| Adaptive to new patterns | ❌ | ✅ |
-| Real-time autonomous response | ⚠️ Limited | ✅ |
-| Human rule maintenance required | ✅ Constant | ❌ None |
-| False positive rate | High | Low (3.2%) |
-| Novel attack generalisation | ❌ | ✅ |
-| Mathematical convergence guarantee | ❌ | ✅ (MDP + RL theory) |
+The tabular **first-visit Monte-Carlo control** run (40,000 episodes, α = 0.05)
+converges to the expected optimal policy on a 3-state abstraction, and its
+unbiased evaluation reproduces the exact Bellman solution:
+
+| Start state | Converged action | Bellman q* | MC evaluation |
+|-------------|------------------|-----------:|--------------:|
+| Normal | Monitor | 8.72 | 8.78 |
+| Suspicious | Honeypot | 23.16 | 23.62 |
+| Compromised | Block | 14.51 | 14.44 |
+
+This confirms the environment and reward model are sound **before any neural
+network is involved** — real-flow observations, noise and masking do not corrupt
+the underlying MDP.
+
+![Q-value trajectories vs Bellman targets](data/processed/tabular_mc_control_learning_curve.png)
+
+---
+
+## 🗺️ Roadmap
+
+- [x] Multi-source preprocessing (CSE-CIC-IDS2018 + CIC-IDS2017), splits + scaler
+- [x] Partial-observability Gymnasium environment
+- [x] Pure reward model + worked-example verification
+- [x] Tabular Monte-Carlo control vs exact Bellman solution
+- [ ] Double DQN with target network
+- [ ] Prioritized Experience Replay
+- [ ] Per-class precision / recall / F1 / FPR on the untouched holdouts
+- [ ] A/B comparison: 2018-only model vs merged-data model
 
 ---
 
 ## 🎓 Course Objectives
 
-This project directly fulfils the following **Temporal Difference Learning** course objectives:
+This project exercises the core **Temporal Difference learning** toolkit:
 
 | Objective | Implementation |
-|-----------|---------------|
-| **TD(0) Q-learning** | Off-policy Bellman update: $y = r + \gamma \max_{a'} Q(s', a'; \theta^-)$ |
-| **Function approximation** | Deep neural network replaces tabular $Q$-table |
-| **Experience Replay** | IID mini-batch sampling from $\mathcal{D}$ stabilises gradient updates |
-| **Target Network** | Frozen $\theta^-$ decouples TD target from online weights |
-| **MDP formalisation** | Full $(S, A, P, R, \gamma)$ definition with stochastic transitions |
-| **ε-greedy exploration** | Balances exploitation of learned policy vs. exploration |
-| **Reward shaping** | Asymmetric reward drives threat containment behaviour |
-
----
-
-## 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome.
-
-```bash
-# Fork → Branch → Commit → PR
-git checkout -b feature/your-feature
-git commit -m "feat: describe your change"
-git push origin feature/your-feature
-```
-
-Please follow [PEP 8](https://pep8.org/) and include docstrings for all public functions.
-
----
-
-## 📄 License
-
-Distributed under the **MIT License**. See [`LICENSE`](LICENSE) for details.
+|-----------|----------------|
+| **TD(0) Q-learning** | off-policy Bellman update with a bootstrapped target |
+| **Function approximation** | a neural network will replace the tabular $Q$-table |
+| **Experience Replay** | (planned) prioritized mini-batch sampling to decorrelate updates |
+| **Target network** | (planned) frozen $\theta^-$ decouples the TD target |
+| **MDP formalisation** | full $(S, A, P, R, \gamma)$ with stochastic transitions |
+| **ε-greedy exploration** | balances exploitation vs. exploration (GLIE in the tabular stage) |
+| **Reward shaping** | asymmetric confusion-matrix payoffs drive containment behaviour |
 
 ---
 

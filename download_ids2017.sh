@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Day 1 (extension): fetch the CIC-IDS2017 archives and unpack them under
+# Fetch the CIC-IDS2017 archives and unpack them under
 # data/raw/ids2017/.
 #
 # Two archives are needed:

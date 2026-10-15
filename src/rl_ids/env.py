@@ -1,4 +1,4 @@
-"""Day 2: Gymnasium environment for RL-IDS.
+"""Gymnasium environment for RL-IDS.
 
 The agent sees a real flow from the CSE-CIC-IDS2018 train table - one of the
 17 normalized telemetry features, corrupted by Gaussian noise and random

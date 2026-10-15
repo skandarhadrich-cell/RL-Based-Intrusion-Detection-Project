@@ -1,6 +1,6 @@
-"""Day 3: reward-function verification.
+"""Reward-function verification.
 
-Emits ``data/processed/day3_report.md`` and re-checks the three claims:
+Emits ``data/processed/reward_function_report.md`` and re-checks the three claims:
 
   1. R(s,a) = R_detection - C_action(a) - P_latency(a)   (component API)
   2. The slides' worked episode reproduces exactly
@@ -8,7 +8,7 @@ Emits ``data/processed/day3_report.md`` and re-checks the three claims:
   3. Online env rewards == pure-function replay, step for step, over many
      seeded episodes (latency branch included).
 
-Run:  ~/venvs/rl-ids/bin/python -m rl_ids.validate_day3
+Run:  ~/venvs/rl-ids/bin/python -m rl_ids.validate_reward
 """
 from __future__ import annotations
 
@@ -99,7 +99,7 @@ def render() -> str:
     ]
 
     out = []
-    out.append("# Day 3 report - reward function\n")
+    out.append("# Reward function - verification report\n")
     out.append(f"Discount factor `gamma = {C.GAMMA}`.\n")
 
     out.append("## Formula\n")
@@ -164,7 +164,7 @@ def render() -> str:
 
 def main() -> None:
     text = render()
-    path = C.PROCESSED_DIR / "day3_report.md"
+    path = C.PROCESSED_DIR / "reward_function_report.md"
     path.write_text(text)
     print(f"Wrote {path}")
     print(f"G0 exact = {verify_worked_example()['g0_exact']:.6f} (slides print -25.85)")

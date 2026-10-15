@@ -1,4 +1,4 @@
-"""Inspect an arbitrary raw-CSV source before integrating it (Day 1 extension).
+"""Inspect an arbitrary raw-CSV source before integrating it.
 
 Answers the questions that must precede any hardcoded config: what files exist,
 what the raw headers really look like (leading spaces, casing), which labels

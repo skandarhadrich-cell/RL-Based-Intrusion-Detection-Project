@@ -1,6 +1,6 @@
-"""Day 1: dataset acquisition cleanup -> labeled, normalized Parquet tables.
+"""Dataset acquisition cleanup -> labeled, normalized Parquet tables.
 
-Now multi-source (Day-1 extension): CSE-CIC-IDS2018 **and** CIC-IDS2017 are
+Now multi-source: CSE-CIC-IDS2018 **and** CIC-IDS2017 are
 processed through the *same* code path, described entirely by
 ``config.SourceSpec`` objects.  Nothing downstream needs to know a feature name
 differs between the two datasets.
@@ -22,7 +22,7 @@ IDS2017 PortScan + DDoS capture files), fit ONE StandardScaler on the merged
 TRAIN split only, write train/holdout Parquet + scaler.json + a markdown report.
 
 The pre-integration IDS2018-only train table and scaler are archived first so
-the Day-7 A/B can still be run against the original model.
+the A/B can still be run against the original model.
 
 Run:  PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.preprocess
 """
@@ -267,7 +267,7 @@ def _per_source_balance(train: pd.DataFrame) -> str:
 
 def write_report(train: pd.DataFrame, holdouts: dict[str, pd.DataFrame],
                  run_stats: list[dict], scaler_payload: dict) -> str:
-    """Day-1 checkpoint report: class balance, provenance, duplicates, trace."""
+    """Preprocessing report: class balance, provenance, duplicates, trace."""
     lines: list[str] = [
         "# Dataset preprocessing Report",
         "",
@@ -354,7 +354,7 @@ def main() -> int:
         if not spec.raw_dir.exists():
             print(f"MISSING source dir {spec.raw_dir} - run ./download_ids2017.sh"
                   if spec.name == C.SOURCE_2017 else
-                  f"MISSING source dir {spec.raw_dir} - run ./download.sh",
+                  f"MISSING source dir {spec.raw_dir} - run ./download_ids2018.sh",
                   file=sys.stderr)
             return 1
         day_done: set[str] = set()

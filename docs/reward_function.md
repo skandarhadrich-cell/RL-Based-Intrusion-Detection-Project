@@ -1,4 +1,4 @@
-# Day 3 — Reward function
+# Reward function
 
 **Goal:** `R(s,a) = R_detection − C_action(a) − P_latency(a)`, implemented as a pure function of
 `(true_label, action)` and **verified against the slides' worked example**.
@@ -44,7 +44,7 @@ sustained DPI/Throttle usage accrues α per extra queued step.
 that the environment consumes. The env bills latency through the same `latency_penalty()`
 function — one source of truth.
 
-## Worked example (the Day-3 checkpoint)
+## Worked example (the reward checkpoint)
 
 | t | state·action | next | reward |
 |---|--------------|------|-------:|
@@ -70,38 +70,38 @@ Monitor is 0 everywhere. On Suspicious: DPI → TN 0 / persist −1 / TP 17 ·
 Throttle → TN −0.5 / persist −1.5 / **escalate FN −41.5** · Honeypot → TN −2 / TP 15.
 On Compromised: **Block persist −2** / **Block resolve +18** (slide convention: TP payoff with
 the 2.0 cost folded in) · **Isolate +3** (TP − 15). Full table in
-`data/processed/day3_report.md`.
+`data/processed/reward_function_report.md`.
 
 ## Verification performed
 
-- **28 pytest** (`tests/test_day3.py`): worked-episode rewards & returns, statelessness,
+- **28 pytest** (`tests/test_reward_function.py`): worked-episode rewards & returns, statelessness,
   event classification for every rule, action costs, Isolate payoff, invalid-action guard,
   component decomposition (`net == detection − cost` for every table entry, with the two
   documented slide conventions), latency curve, and the G0 checkpoint.
 - **Replay consistency**: 60 seeded episodes (984 steps) → online `env.step` reward equals
   `step_reward(state, action, next, latency_run)` on every step, worst diff 0.
-- `python -m rl_ids.validate_day3` regenerates `data/processed/day3_report.md`.
+- `python -m rl_ids.validate_reward` regenerates `data/processed/reward_function_report.md`.
 
 ## How to run
 
 ```bash
-PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.validate_day3   # report
-~/venvs/rl-ids/bin/python -m pytest tests/test_day3.py -v
+PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.validate_reward   # report
+~/venvs/rl-ids/bin/python -m pytest tests/test_reward_function.py -v
 ```
 
-## Day-4 heads-up (already flagged in `docs/day2.md`)
+## Tabular-phase heads-up (already flagged in `docs/environment.md`)
 
-The stationary model with these rewards satisfies the Day-3 checkpoint exactly but caps
+The stationary model with these rewards satisfies the reward checkpoint exactly but caps
 `q(Compromised, Block) ≤ 18` (persist pays no detection), so the slide's q*-target of 31.06
-can't coexist with persist-reward −2. Day 4's tabular run will report converged q-values vs.
+can't coexist with persist-reward −2. The tabular run will report converged q-values vs.
 the targets and quantify the gap.
 
 ## Artifacts
 
 - `src/rl_ids/reward.py` — components + pure net table (used by the env)
-- `src/rl_ids/validate_day3.py` — report generator + replay-consistency check
-- `data/processed/day3_report.md` — generated verification report
-- `tests/test_day3.py` (28 tests) · `docs/day3.md`
+- `src/rl_ids/validate_reward.py` — report generator + replay-consistency check
+- `data/processed/reward_function_report.md` — generated verification report
+- `tests/test_reward_function.py` (28 tests) · `docs/reward_function.md`
 
 ---
-*Next: Day 4 — tabular Monte-Carlo control sanity check (`docs/day4.md`).*
+*Next: tabular Monte-Carlo control sanity check (`docs/tabular_mc_control.md`).*

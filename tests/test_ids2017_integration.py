@@ -1,4 +1,4 @@
-"""Day-1 extension tests: CIC-IDS2017 integration into the merged pipeline.
+"""CIC-IDS2017 integration tests: the 2017 source in the merged pipeline.
 
 These assert the requirements of the controlled integration experiment:
 

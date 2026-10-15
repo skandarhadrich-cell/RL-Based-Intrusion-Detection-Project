@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Day 1: fetch all 10 processed CSE-CIC-IDS2018 CSVs.
+# Fetch all 10 processed CSE-CIC-IDS2018 CSVs.
 # Resume-safe: per-file size check, byte-range resume, outer retry loop.
 set -u
 BASE="https://cse-cic-ids2018.s3.ca-central-1.amazonaws.com/Processed%20Traffic%20Data%20for%20ML%20Algorithms"

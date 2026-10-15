@@ -1,11 +1,11 @@
-# Day 2 — Gymnasium environment (`RL-IDS-v0`)
+# Gymnasium environment (`RL-IDS-v0`)
 
 **Goal:** a working `gym.Env` reproducing the state/action structure of the MDP slides,
-whose observations are **real flows from the Day-1 train table** (partial observability via
+whose observations are **real flows from the preprocessing train table** (partial observability via
 noise + masking), and whose transition/reward model is the single source of truth for the
-Day-3/4/5 checkpoints.
+reward / tabular / DQN checkpoints.
 
-**Status: DONE** — 32 Day-2/3 tests pass (42 total with Day-1).
+**Status: DONE** — environment and reward tests pass (full suite: 88 tests).
 
 ---
 
@@ -45,7 +45,7 @@ the agent **Isolates**, or `max_steps` (default 100) is hit. Terminal reasons ar
 
 ## Transition model
 
-### Configured kernel (slide-style, tuned for Day-3/4 checkpoints)
+### Configured kernel (slide-style, tuned for the reward/tabular checkpoints)
 
 | State·Action         | → Normal | → Suspicious | → Compromised | → terminal |
 |----------------------|---------:|-------------:|--------------:|-----------:|
@@ -58,7 +58,7 @@ the agent **Isolates**, or `max_steps` (default 100) is hit. Terminal reasons ar
 | **C · Block**        | 0.497    |              | 0.503         |            |
 | **C · Isolate**      |          |              |               | 1.0        |
 
-### Empirical flow-sequence matrix (real data, full 15.2M train rows)
+### Empirical flow-sequence matrix (real data, full 16.7M merged train rows)
 Consecutive-flow `state_t → state_{t+1}` counts, aggregated over all train days:
 
 | state_t \\ state_{t+1} | Normal | Suspicious | Compromised |
@@ -72,7 +72,7 @@ brute-force runs are self-perpetuating, compromised traffic mostly stays comprom
 occasionally resolves back to normal (~10%/step). The *configured* kernel is more attack-heavy
 than the raw data (it is the slide model: attack arrival at Normal 0.155 vs 0.018 empirical)
 because the checkpoints target the slide story; the empirical kernel remains available for
-Day-6/7 realism sweeps (`env.empirical_state_transitions`).
+later realism sweeps (`env.empirical_state_transitions`).
 
 ---
 
@@ -96,7 +96,7 @@ Throttle on S: TN −0.5 / persist −1.5 / **FN −41.5** · Honeypot on S: TN 
 `α·max(0, consecutive_DPI/Throttle − 1)` (α=0.25) is subtracted by the env, punishing
 overuse without touching the pure function.
 
-### Day-3 checkpoint (worked episode from the slides)
+### Reward checkpoint (worked episode from the slides)
 
 | t | state·action | reward | next |
 |---|--------------|-------:|------|
@@ -108,15 +108,15 @@ overuse without touching the pure function.
 Returns (γ=0.9): G₃=18, G₂=14.2, G₁=−28.72, **G₀ = −25.848**. The slides print −25.85
 (rounding); the test asserts both the exact value (±1e-3) and the printed value (±1e-2).
 
-> **Reconciliation note (Day-4 consequence).** The slide's q*-targets on the same episode
+> **Reconciliation note (tabular consequence).** The slide's q*-targets on the same episode
 > numbers would be Normal→Monitor 18.29, Suspicious→Honeypot 28.61, Compromised→Block 31.06.
 > A *stationary* MDP with the worked-example reward (Block-persist = −2, resolve = +18)
-> satisfies the Day-3 checkpoint exactly but caps q(C,Block) ≤ 18 (each persist step pays no
+> satisfies the reward checkpoint exactly but caps q(C,Block) ≤ 18 (each persist step pays no
 > detection), so the 31.06 target is **not** simultaneously reproducible in this single reward
 > model — it implies a reward that pays a TP on every successful block (+16 per persist).
-> We keep the reward locked to the literal Day-3 checkpoint and will report our model's
-> converged q-values vs. the slide targets (and the gap) on Day 4. Under this stationary
-> model a quick Monte-Carlo already gives q(N,Monitor) ≈ 8.7, q(S,Honeypot) ≈ 23.2,
+> We keep the reward locked to the literal worked example and will report our model's
+> converged q-values vs. the slide targets (and the gap) in the tabular phase. Under this
+> stationary model a quick Monte-Carlo already gives q(N,Monitor) ≈ 8.7, q(S,Honeypot) ≈ 23.2,
 > q(C,Block) ≈ 14.5.
 
 ---
@@ -128,21 +128,21 @@ Returns (γ=0.9): G₃=18, G₂=14.2, G₁=−28.72, **G₀ = −25.848**. The s
 - With noise+masking on, the same row diverges (partial observability works).
 - Fixed seed ⇒ reproducible episodes (`io` seeded independently per reset).
 
-## Tests (32 new + 10 Day-1)
+## Tests
 
-`tests/test_day2.py` — space structure (Box(17), Discrete(6)), masks per state, reset
+`tests/test_environment.py` — space structure (Box(17), Discrete(6)), masks per state, reset
 semantics, observation corruption + real-row provenance, transition normalization,
 empirical matrix, max-steps and Isolate termination, latency overuse penalty, invalid-action
 penalty, seed reproducibility, legality of every (state, action) pair.
 
-`tests/test_day3.py` — worked-episode rewards `[0, −41.5, −2, +18]`, returns
+`tests/test_reward_function.py` — worked-episode rewards `[0, −41.5, −2, +18]`, returns
 (G₀ = −25.848 exact / −25.85 printed), statelessness, event classification (TN/TP/FP/FN/NONE),
 action costs, Isolate payoff, invalid-action guard, reward closure over the transition table.
 
 ## How to run
 
 ```bash
-~/venvs/rl-ids/bin/python -m pytest tests/test_day2.py tests/test_day3.py -v
+~/venvs/rl-ids/bin/python -m pytest tests/test_environment.py tests/test_reward_function.py -v
 PYTHONPATH=src ~/venvs/rl-ids/bin/python - <<'EOF'
 from rl_ids.env import IDSEnv2018
 env = IDSEnv2018(seed=1)
@@ -157,8 +157,8 @@ EOF
 - `src/rl_ids/env.py` — `IDSEnv2018`, `empirical_state_transitions`
 - `src/rl_ids/reward.py` — pure reward model + event classification
 - `src/rl_ids/config.py` — MDP block: actions, masks, costs, transitions, noise, latency
-- `tests/test_day2.py`, `tests/test_day3.py`
+- `tests/test_environment.py`, `tests/test_reward_function.py`
 
 ---
-*Next: Day 3 — reward/return verification + eval harness on the real env. Day-4 will run
-tabular control and record converged q-values vs. the slide targets.*
+*Next: the reward function — verification + eval harness on the real env. The tabular phase
+then runs control and records converged q-values vs. the slide targets.*

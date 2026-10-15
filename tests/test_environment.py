@@ -1,6 +1,6 @@
-"""Day 2 checkpoint tests: the Gymnasium environment.
+"""Gymnasium environment tests.
 
-Checkpoint (from the plan):
+Checkpoint:
   a working gym.Env with the MDP state/action structure, obs in Box(n_obs),
   action masks per playbook, stochastic transitions, terminal conditions,
   partial observability (noise+masking) and data-driven observations sampled

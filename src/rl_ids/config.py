@@ -1,4 +1,4 @@
-"""Central configuration for the RL-IDS project (Day 1: dataset + preprocessing).
+"""Central configuration for the RL-IDS project (dataset + preprocessing).
 
 Everything downstream (environment, agents, evaluation) imports paths, the
 feature list and the label->state mapping from here so there is exactly one
@@ -20,14 +20,14 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 TRAIN_PARQUET = PROCESSED_DIR / "train.parquet"
 HOLDOUT_PARQUET = PROCESSED_DIR / "holdout_infiltration.parquet"
 SCALER_JSON = PROCESSED_DIR / "scaler.json"
-# The Day-1 report is presented at the repo root as a human-readable deliverable
-# (renamed from data/processed/day1_report.md). The generator writes *there* so
-# there is a single, always-current copy rather than a stale duplicate.
+# The preprocessing report is presented at the repo root as a human-readable
+# deliverable (previously kept under data/processed/). The generator writes
+# *there* so there is a single, always-current copy rather than a stale duplicate.
 REPORT_PATH = PROJECT_ROOT / "Dataset preprocessing Report.md"
 
-# Day-1 extension (CIC-IDS2017 integration): the IDS2017 eval-only split gets its
-# own file, and the pre-integration IDS2018-only artifacts are archived so the
-# Day-7 A/B can still be run against the original model/scaler.
+# CIC-IDS2017 integration: the IDS2017 eval-only split gets its own file, and the
+# pre-integration IDS2018-only artifacts are archived so the A/B can still be run
+# against the original model/scaler.
 HOLDOUT_IDS2017_PARQUET = PROCESSED_DIR / "holdout_ids2017_portscan_ddos.parquet"
 TRAIN_IDS2018_ONLY_PARQUET = PROCESSED_DIR / "train_ids2018_only.parquet"
 SCALER_IDS2018_BASELINE_JSON = PROCESSED_DIR / "scaler_ids2018_baseline.json"
@@ -48,7 +48,7 @@ RAW_FILES = [
     "Friday-02-03-2018_TrafficForML_CICFlowMeter.csv",      # Bot
 ]
 
-# Eval-only days: never seen during training (Day-7 generalization test).
+# Eval-only days: never seen during training (generalization test).
 HOLDOUT_DAYS = frozenset({"Wednesday-28-02-2018", "Thursday-01-03-2018"})
 
 TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M:%S"   # verified against raw files
@@ -56,7 +56,7 @@ MIN_TIMESTAMP = "2010-01-01"              # rows before this have broken clocks 
 EMBEDDED_HEADER_VALUE = "Timestamp"      # value in Timestamp col marks a duplicated header row
 
 # --------------------------------------------------------------------------- #
-# Multi-source layout (Day-1 extension): CSE-CIC-IDS2018 + CIC-IDS2017
+# Multi-source layout: CSE-CIC-IDS2018 + CIC-IDS2017
 # --------------------------------------------------------------------------- #
 # Each source is described by one SourceSpec so the whole pipeline (preprocess,
 # env, reports, tests) is source-agnostic.  Downstream code never hardcodes a
@@ -97,7 +97,7 @@ IDS2017_RENAMES: dict[str, str] = {
 
 # Rate columns CIC-IDS2017 ships (already computed by CICFlowMeter) -> canonical
 # names.  Our pipeline recomputes these from totals/duration, so these are used
-# only by the feature-parity cross-check (tests/test_day1_ids2017.py), never as
+# only by the feature-parity cross-check (tests/test_ids2017_integration.py), never as
 # model input.
 IDS2017_SHIPPED_RATES: dict[str, str] = {
     "Flow Packets/s": "Flow Pkts/s",
@@ -176,7 +176,7 @@ IDS2017_SPEC = SourceSpec(
     # Verified against the raw files: CICFlowMeter-2017 emits MINUTE resolution
     # ("7/7/2017 1:00"), vs CICFlowMeter-2018's second resolution.  The derived
     # Active Conn Cnt therefore has the same meaning/units but coarser temporal
-    # granularity for 2017 (documented in docs/day1.md).
+    # granularity for 2017 (documented in docs/dataset_preprocessing.md).
     timestamp_format="%d/%m/%Y %H:%M",
     min_timestamp=MIN_TIMESTAMP,
     embedded_header_value=None,
@@ -334,7 +334,7 @@ PORT_BUCKET_EDGES = (1024, 49152)
 BATCH_CHUNKSIZE = 250_000  # rows per read_csv chunk
 
 # --------------------------------------------------------------------------- #
-# Day 2+ : MDP environment (Gymnasium)
+# MDP environment (Gymnasium)
 # --------------------------------------------------------------------------- #
 # The agent sees only the 17-feature observation vector. The *true* MDP state
 # (label bucket) is hidden and drives transitions + rewards (eval info only).
@@ -379,7 +379,7 @@ DETECTION_REWARDS: dict[str, float] = {
 # Masked / illegal actions must never be profitable.
 INVALID_ACTION_PENALTY = -100.0
 
-GAMMA = 0.9  # discount factor used across Day 3-4 checkpoints
+GAMMA = 0.9  # discount factor used across the reward/tabular checkpoints
 
 MAX_STEPS_DEFAULT = 100     # episode length cap (MC episodes start at Normal)
 LATENCY_ALPHA = 0.25        # per-step latency penalty for DPI/Throttle overuse
@@ -389,7 +389,7 @@ OBS_MASK_PROB = 0.1         # per-feature probability of "missing telemetry" (->
 # --------------------------------------------------------------------------- #
 # MDP transition model  (state, action) -> {next_state: probability}
 # --------------------------------------------------------------------------- #
-# Slide-consistent model tuned (via the Bellman equations) so that the Day-4
+# Slide-consistent model tuned (via the Bellman equations) so that the tabular
 # tabular agent converges to the expected q* (Normal->Monitor 18.29,
 # Suspicious->Honeypot 28.61, Compromised->Block 31.06) under GAMMA=0.9
 # when observations are the real dataset flows sampled from each state.

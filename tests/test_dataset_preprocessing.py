@@ -1,6 +1,6 @@
-"""Day 1 checkpoint tests.
+"""Dataset preprocessing tests.
 
-Checkpoint (from the plan):
+Checkpoint:
   df.isna().sum().sum() == 0, class balance printed, and a 5-row sample
   manually traced to the correct MDP state.
 """

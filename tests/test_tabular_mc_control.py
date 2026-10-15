@@ -1,4 +1,4 @@
-"""Day 4: tabular sanity check - first-visit constant-α GLIE MC control.
+"""Tabular sanity check - first-visit constant-α GLIE MC control.
 
 Coverage:
     - first-visit return semantics (regression for the reversed-trace bug)
@@ -27,7 +27,7 @@ M, B, H = C.ACTION_INDEX["Monitor"], C.ACTION_INDEX["Block"], C.ACTION_INDEX["Ho
 EXPECTED_POLICY = {"Normal": ["Monitor"], "Suspicious": ["Honeypot"],
                    "Compromised": ["Block"]}
 
-# Analytic values on the locked Day-3 reward model (computed by hand, verified
+# Analytic values on the locked reward model (computed by hand, verified
 # against the env's transition kernel and the Bellman solver).
 BELLMAN = {
     ("Normal", "Monitor"): 8.7215,

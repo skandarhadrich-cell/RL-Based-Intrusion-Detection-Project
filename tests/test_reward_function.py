@@ -1,6 +1,6 @@
-"""Day 3 checkpoint tests: reward model correctness.
+"""Reward model correctness tests.
 
-The plan's worked example (from the MDP slides):
+The worked example (from the MDP slides):
 
     t=0 Normal·Monitor    R1=0      -> Suspicious
     t=1 Suspicious·Throttle R2=-41.5 -> Compromised
@@ -54,7 +54,7 @@ def test_worked_episode_returns():
     assert g[2] == pytest.approx(-2.0 + 0.9 * 18.0)                 # 14.2
     assert g[1] == pytest.approx(-41.5 + 0.9 * 14.2)                # -28.72
     assert g[0] == pytest.approx(-25.848, abs=1e-3)                 # exact
-    assert g[0] == pytest.approx(-25.85, abs=1e-2)                  # printed plan
+    assert g[0] == pytest.approx(-25.85, abs=1e-2)                  # slides print
 
 
 def test_reward_is_stateless():
@@ -129,7 +129,7 @@ def test_reward_closed_over_transition_table():
 
 
 # --------------------------------------------------------------------------- #
-# Day 3: explicit R(s,a) = R_detection - C_action - P_latency components
+# Explicit R(s,a) = R_detection - C_action - P_latency components
 # --------------------------------------------------------------------------- #
 def test_detection_payoff_none_is_zero():
     assert detection_payoff("NONE") == 0.0
@@ -186,7 +186,7 @@ def test_returns_from_trace_matches_worked_example():
 # 6. Checkpoint: G0 == -25.85 for the scripted episode (slides).
 # --------------------------------------------------------------------------- #
 def test_checkpoint_g0_equals_slides():
-    """The plan's checkpoint. Note: with the printed rewards (0,-41.5,-2,+18)
+    """The reward checkpoint. Note: with the printed rewards (0,-41.5,-2,+18)
     the recurrence gives exactly -25.848 (= 0.9 * -28.72); the slide prints
     -25.85 rounded. We enforce the EXACT recurrence at 1e-6 AND the printed
     value at 2 decimal places."""
