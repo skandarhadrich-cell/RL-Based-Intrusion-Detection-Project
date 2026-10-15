@@ -208,7 +208,7 @@ can be A/B-compared against the merged-data model on identical holdouts.
 
 Full methodology, feature-parity checks and caveats:
 [`docs/dataset_preprocessing.md`](docs/dataset_preprocessing.md) and the
-generated [`Dataset preprocessing Report.md`](Dataset%20preprocessing%20Report.md).
+generated [`data/processed/dataset_preprocessing_report.md`](data/processed/dataset_preprocessing_report.md).
 
 ---
 
@@ -225,28 +225,34 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── reward.py            # pure reward model + event classification
 │   ├── tabular.py           # first-visit MC control + exact Bellman solver
 │   ├── train_tabular.py     # tabular sanity-check driver (report + curve)
+│   ├── dqn.py               # Double DQN agent: network, replay, masked update
+│   ├── train_dqn.py         # Double DQN training driver (report + curve)
 │   └── validate_reward.py   # reward verification report + replay check
 │
-├── tests/                   # pytest suite (88 tests)
+├── tests/                   # pytest suite (105 tests)
 │   ├── test_dataset_preprocessing.py
 │   ├── test_ids2017_integration.py
 │   ├── test_environment.py
 │   ├── test_reward_function.py
-│   └── test_tabular_mc_control.py
+│   ├── test_tabular_mc_control.py
+│   └── test_dqn.py
 │
 ├── docs/
 │   ├── dataset_preprocessing.md   # acquisition, cleaning, merge, splits
 │   ├── environment.md             # MDP, transitions, observation model
 │   ├── reward_function.md         # reward design + worked example
-│   └── tabular_mc_control.md      # MC control vs exact Bellman solution
+│   ├── tabular_mc_control.md      # MC control vs exact Bellman solution
+│   └── double_dqn.md              # Double DQN agent design + training
 │
 ├── data/
 │   ├── raw/                 # downloaded CSVs (git-ignored)
 │   └── processed/           # Parquet splits, scaler.json, generated reports
 │
+├── models/                  # trained weights (git-ignored)
+│
 ├── download_ids2018.sh      # fetch CSE-CIC-IDS2018 CSVs
 ├── download_ids2017.sh      # fetch + unpack CIC-IDS2017 archives
-├── Dataset preprocessing Report.md   # auto-generated pipeline report
+├── requirements.txt
 └── README.md
 ```
 
@@ -308,7 +314,7 @@ PYTHONPATH=src python -m rl_ids.preprocess
 
 This writes `data/processed/{train,holdout_infiltration,holdout_ids2017_portscan_ddos}.parquet`,
 `scaler.json`, the archived 2018-only baseline, and regenerates
-`Dataset preprocessing Report.md`.
+`data/processed/dataset_preprocessing_report.md`.
 
 ### 3. Verify the reward model
 
@@ -322,7 +328,17 @@ PYTHONPATH=src python -m rl_ids.validate_reward   # -> reward_function_report.md
 PYTHONPATH=src python -m rl_ids.train_tabular     # -> tabular_mc_control_report.md + curve
 ```
 
-### 5. Run the test suite
+### 5. Train the Double DQN agent
+
+```bash
+PYTHONPATH=src python -m rl_ids.train_dqn         # -> double_dqn_report.md + curve + models/double_dqn.pt
+```
+
+This is the heavy online step: it loads real-flow observation pools into memory,
+so give the machine enough RAM (or lower `MAX_ROWS_PER_STATE` in
+`src/rl_ids/train_dqn.py`).
+
+### 6. Run the test suite
 
 ```bash
 python -m pytest tests/ -q
@@ -341,7 +357,7 @@ replace `python` with its interpreter if needed.)*
 | Gymnasium environment | ✅ done | [`docs/environment.md`](docs/environment.md) |
 | Reward function | ✅ done | [`docs/reward_function.md`](docs/reward_function.md) |
 | Tabular MC sanity check | ✅ done | [`docs/tabular_mc_control.md`](docs/tabular_mc_control.md) |
-| Double DQN | ⏳ in progress | — |
+| Double DQN | 🔨 implemented (run pending RAM) | [`docs/double_dqn.md`](docs/double_dqn.md) |
 | Prioritized Experience Replay | ⏳ planned | — |
 | 2018-only vs merged-data A/B | ⏳ planned | — |
 
@@ -373,7 +389,7 @@ the underlying MDP.
 - [x] Partial-observability Gymnasium environment
 - [x] Pure reward model + worked-example verification
 - [x] Tabular Monte-Carlo control vs exact Bellman solution
-- [ ] Double DQN with target network
+- [~] Double DQN with target network (implemented; training run pending RAM)
 - [ ] Prioritized Experience Replay
 - [ ] Per-class precision / recall / F1 / FPR on the untouched holdouts
 - [ ] A/B comparison: 2018-only model vs merged-data model
@@ -387,9 +403,9 @@ This project exercises the core **Temporal Difference learning** toolkit:
 | Objective | Implementation |
 |-----------|----------------|
 | **TD(0) Q-learning** | off-policy Bellman update with a bootstrapped target |
-| **Function approximation** | a neural network will replace the tabular $Q$-table |
-| **Experience Replay** | (planned) prioritized mini-batch sampling to decorrelate updates |
-| **Target network** | (planned) frozen $\theta^-$ decouples the TD target |
+| **Function approximation** | a Double DQN network replaces the tabular $Q$-table |
+| **Experience Replay** | uniform replay now; prioritized mini-batch sampling planned |
+| **Target network** | frozen $\theta^-$ decouples the TD target (hard-copied every 1k updates) |
 | **MDP formalisation** | full $(S, A, P, R, \gamma)$ with stochastic transitions |
 | **ε-greedy exploration** | balances exploitation vs. exploration (GLIE in the tabular stage) |
 | **Reward shaping** | asymmetric confusion-matrix payoffs drive containment behaviour |

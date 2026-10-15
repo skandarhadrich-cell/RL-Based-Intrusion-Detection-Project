@@ -20,10 +20,9 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 TRAIN_PARQUET = PROCESSED_DIR / "train.parquet"
 HOLDOUT_PARQUET = PROCESSED_DIR / "holdout_infiltration.parquet"
 SCALER_JSON = PROCESSED_DIR / "scaler.json"
-# The preprocessing report is presented at the repo root as a human-readable
-# deliverable (previously kept under data/processed/). The generator writes
-# *there* so there is a single, always-current copy rather than a stale duplicate.
-REPORT_PATH = PROJECT_ROOT / "Dataset preprocessing Report.md"
+# The preprocessing report lives alongside the other generated reports in
+# data/processed/ so there is a single, always-current copy.
+REPORT_PATH = PROCESSED_DIR / "dataset_preprocessing_report.md"
 
 # CIC-IDS2017 integration: the IDS2017 eval-only split gets its own file, and the
 # pre-integration IDS2018-only artifacts are archived so the A/B can still be run
@@ -419,5 +418,30 @@ TRANSITIONS: dict[str, dict[str, dict[str, float]]] = {
 TERMINAL_MARKER = "__terminal__"
 
 # Max rows sampled per state for observation pools (bounded memory). The full
-# 15.2M-row train set can be enabled by the training day (VM RAM upgrade).
+# 16.7M-row merged train set can be enabled with more VM RAM; the DQN run raises
+# this via config.DQN_MAX_ROWS_PER_STATE.
 DEFAULT_MAX_ROWS_PER_STATE = 50_000
+
+
+# --------------------------------------------------------------------------- #
+# Deep RL - Double DQN (DQN phase)
+# --------------------------------------------------------------------------- #
+# The Q-network is an MLP over the 17-feature observation. The playbook action
+# mask is applied externally at every argmax/selection (it is not an
+# observation).
+DQN_HIDDEN: tuple[int, ...] = (128, 128)
+DQN_LR = 1e-3
+DQN_BATCH_SIZE = 64
+DQN_REPLAY_CAPACITY = 200_000
+DQN_REPLAY_WARMUP = 2_000          # uniform-random steps before learning starts
+DQN_TARGET_SYNC = 1_000            # hard-copy target network every N updates
+DQN_GRAD_CLIP = 10.0               # max-norm gradient clipping (None disables)
+DQN_EPS_START = 1.0
+DQN_EPS_END = 0.05
+DQN_EPS_DECAY = 0.995              # per-episode multiplicative decay
+DQN_MAX_ROWS_PER_STATE = 200_000   # obs pool cap for the DQN run (RAM-dependent)
+
+DQN_REPORT_PATH = PROCESSED_DIR / "double_dqn_report.md"
+DQN_CURVE_PNG = PROCESSED_DIR / "double_dqn_learning_curve.png"
+MODELS_DIR = PROJECT_ROOT / "models"
+DQN_MODEL_PATH = MODELS_DIR / "double_dqn.pt"

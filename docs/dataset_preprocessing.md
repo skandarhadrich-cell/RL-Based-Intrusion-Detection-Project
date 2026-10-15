@@ -99,7 +99,7 @@ and SQLi rows are few (611/230/87) but present.
 - `data/raw/*.csv` (10 files, ~6.9 GB) — raw CICFlowMeter exports
 - `data/processed/train.parquet` (16.7 M merged rows), `holdout_infiltration.parquet` (701 k)
 - `data/processed/scaler.json` — z-score params fit on the merged train split only
-- `Dataset preprocessing Report.md` (repo root) — auto-generated pipeline report
+- `data/processed/dataset_preprocessing_report.md` — auto-generated pipeline report
 - `src/rl_ids/{config.py, preprocess.py}` · `tests/test_dataset_preprocessing.py` · `download_ids2018.sh`
 
 ## How to run
@@ -166,7 +166,7 @@ not corrected.
 
 The 2018 pipeline above originally kept duplicate rows. This revision drops
 **exact duplicate rows** (uniformly across both sources) and reports counts
-(`Dataset preprocessing Report.md`): **1,169,192** duplicates removed
+(`data/processed/dataset_preprocessing_report.md`): **1,169,192** duplicates removed
 (786,067 in 2018, 383,125 in 2017). Inf/NaN handling, the 1970-clock guard and the
 rate recomputation are unchanged.
 
@@ -203,7 +203,7 @@ rate recomputation are unchanged.
 The 2017 Suspicious rows (FTP-Patator 6,330 + SSH-Patator 5,028) are the new
 signal the merge adds; 2017 also contributes DoS (Hulk/GoldenEye/Slowloris/Slowhttptest),
 Bot, Web-Attack, Heartbleed and 36 Infiltration rows (see the label inventory in
-`Dataset preprocessing Report.md`).
+`data/processed/dataset_preprocessing_report.md`).
 
 ### 7. Label policy & provenance
 
