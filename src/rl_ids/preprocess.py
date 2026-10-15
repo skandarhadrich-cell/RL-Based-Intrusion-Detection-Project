@@ -1,5 +1,10 @@
 """Day 1: dataset acquisition cleanup -> labeled, normalized Parquet tables.
 
+Now multi-source (Day-1 extension): CSE-CIC-IDS2018 **and** CIC-IDS2017 are
+processed through the *same* code path, described entirely by
+``config.SourceSpec`` objects.  Nothing downstream needs to know a feature name
+differs between the two datasets.
+
 Pipeline (per raw CSV, chunked to stay memory-safe on small VMs):
 
   Pass A  read only [Timestamp, Flow Duration] -> drop embedded header rows and
@@ -9,17 +14,22 @@ Pipeline (per raw CSV, chunked to stay memory-safe on small VMs):
   Pass B  read the ~16 needed columns -> drop the exact same rows (same rule,
           so row order/alignment is identical) -> coerce numerics (float32) ->
           derive packet/byte rates with safe division (no Inf) -> attach
-          Pass-A columns -> map labels to MDP states -> drop Inf/NaN rows ->
-          sort by time.
+          Pass-A columns -> map labels to MDP states -> drop exact duplicate
+          rows (quality control) -> drop Inf/NaN rows -> sort by time.
 
-Finally: split off the held-out Infiltration days, fit a StandardScaler on the
+Finally: split off each source's held-out day(s) (IDS2018 Infiltration days;
+IDS2017 PortScan + DDoS capture files), fit ONE StandardScaler on the merged
 TRAIN split only, write train/holdout Parquet + scaler.json + a markdown report.
 
-Run:  ~/venvs/rl-ids/bin/python -m rl_ids.preprocess
+The pre-integration IDS2018-only train table and scaler are archived first so
+the Day-7 A/B can still be run against the original model.
+
+Run:  PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.preprocess
 """
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 import warnings
 
@@ -36,37 +46,73 @@ _RATE_INPUTS = ["Tot Fwd Pkts", "Tot Bwd Pkts"]          # already in RAW_COLUMN
 _NUMERIC_COLS = [c for c in C.RAW_COLUMNS if c not in ("Timestamp", "Label")]
 
 
-def day_from_filename(path) -> str:
-    """'Wednesday-14-02-2018_TrafficForML_CICFlowMeter.csv' -> 'Wednesday-14-02-2018'."""
-    return path.name.split("_")[0]
+# --------------------------------------------------------------------------- #
+# Source adapter: read any raw CSV through its SourceSpec
+# --------------------------------------------------------------------------- #
+def _read_chunks(path, spec: C.SourceSpec, wanted_canonical: list[str]):
+    """Yield chunks with canonical column names, reading only wanted columns.
+
+    ``usecols`` is a predicate over the *raw* headers, so leading-space /
+    differently-named columns (e.g. ' Destination Port', 'Total Fwd Packets')
+    are matched via the spec's canonical mapping instead of assumed identical.
+    """
+    wanted = set(wanted_canonical)
+    reader = pd.read_csv(
+        path,
+        usecols=lambda col: spec.canonical(col) in wanted,
+        chunksize=C.BATCH_CHUNKSIZE,
+        engine="c",
+        encoding=spec.encoding,
+    )
+    for chunk in reader:
+        chunk = chunk.rename(columns={c: spec.canonical(c) for c in chunk.columns})
+        yield chunk
 
 
-def _timestamp_masks(ts: pd.Series) -> pd.Series:
+def _parse_timestamps(ts: pd.Series, spec: C.SourceSpec) -> pd.Series:
+    """Parse a timestamp column, trying the spec's format list in order.
+
+    CIC-IDS2017 mixes minute and second resolution across files, so rows that
+    fail the primary format are retried with each alternate format.
+    """
+    parsed = pd.to_datetime(ts, format=spec.timestamp_format, errors="coerce")
+    for fmt in spec.alternate_timestamp_formats:
+        missing = parsed.isna()
+        if not missing.any():
+            break
+        parsed = parsed.where(
+            ~missing,
+            pd.to_datetime(ts.where(missing), format=fmt, errors="coerce"),
+        )
+    return parsed
+
+
+def _timestamp_masks(ts: pd.Series, spec: C.SourceSpec) -> pd.Series:
     """Boolean mask of usable rows: not an embedded header AND parsable timestamp.
 
     BOTH passes must apply exactly this rule so their row alignment matches.
-    (Embedded header rows have the literal value 'Timestamp' in this column.)
     """
-    not_header = ts != C.EMBEDDED_HEADER_VALUE
-    parsed = pd.to_datetime(ts.where(not_header), format=C.TIMESTAMP_FORMAT,
-                            errors="coerce")
-    # Not-a-timestamp (embedded header rows) and broken-clock rows (1970) are
-    # both unusable - drop them in BOTH passes so row alignment stays identical.
-    return parsed.notna() & (parsed >= pd.Timestamp(C.MIN_TIMESTAMP))
+    if spec.embedded_header_value is None:
+        not_header = pd.Series(True, index=ts.index)
+    else:
+        not_header = ts != spec.embedded_header_value
+    parsed = _parse_timestamps(ts.where(not_header), spec)
+    # Not-a-timestamp (embedded header rows, empty/trailing junk rows) and
+    # broken-clock rows (1970) are both unusable - drop them in BOTH passes so
+    # row alignment stays identical.
+    return parsed.notna() & (parsed >= pd.Timestamp(spec.min_timestamp))
 
 
-def pass_a(path) -> tuple[np.ndarray, np.ndarray]:
+def pass_a(path, spec: C.SourceSpec) -> tuple[np.ndarray, np.ndarray]:
     """Epoch seconds (int64) + flow duration seconds (float64), header rows removed.
 
     Arrays are aligned with the rows Pass B keeps *before* its final Inf/NaN drop.
     """
     epochs: list[np.ndarray] = []
     durs: list[np.ndarray] = []
-    for chunk in pd.read_csv(path, usecols=["Timestamp", "Flow Duration"],
-                             chunksize=C.BATCH_CHUNKSIZE, engine="c"):
-        mask = _timestamp_masks(chunk["Timestamp"])
-        parsed = pd.to_datetime(chunk.loc[mask, "Timestamp"],
-                                format=C.TIMESTAMP_FORMAT, errors="coerce")
+    for chunk in _read_chunks(path, spec, ["Timestamp", "Flow Duration"]):
+        mask = _timestamp_masks(chunk["Timestamp"], spec)
+        parsed = _parse_timestamps(chunk.loc[mask, "Timestamp"], spec)
         if parsed.empty:
             continue
         dur = pd.to_numeric(chunk.loc[mask, "Flow Duration"],
@@ -94,13 +140,12 @@ def active_connection_count(epochs: np.ndarray, dur_s: np.ndarray) -> np.ndarray
     return (n_start - n_end).astype(np.int32)
 
 
-def pass_b(path) -> pd.DataFrame:
+def pass_b(path, spec: C.SourceSpec) -> pd.DataFrame:
     """Feature/label chunk-frame for one day (raw columns, float32)."""
     usecols = list(dict.fromkeys(C.RAW_COLUMNS + _RATE_INPUTS))  # dedup, keep order
     parts: list[pd.DataFrame] = []
-    for chunk in pd.read_csv(path, usecols=usecols, chunksize=C.BATCH_CHUNKSIZE,
-                             engine="c"):
-        mask = _timestamp_masks(chunk["Timestamp"])   # same rule as pass A
+    for chunk in _read_chunks(path, spec, usecols):
+        mask = _timestamp_masks(chunk["Timestamp"], spec)   # same rule as pass A
         chunk = chunk.loc[mask].drop(columns="Timestamp")   # row alignment kept
         if chunk.empty:
             continue
@@ -113,15 +158,15 @@ def pass_b(path) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
-def build_day(path) -> pd.DataFrame:
+def build_day(path, spec: C.SourceSpec) -> tuple[pd.DataFrame, dict]:
     """Clean one raw CSV, derive features, map labels -> full observation table."""
-    day = day_from_filename(path)
-    epochs, dur_s = pass_a(path)
-    df = pass_b(path)
+    day = spec.day_of(path.name)
+    epochs, dur_s = pass_a(path, spec)
+    df = pass_b(path, spec)
     if len(df) != len(epochs):
         raise AssertionError(
-            f"{day}: pass A/B row mismatch ({len(epochs)} vs {len(df)}) - "
-            f"the row-drop rules in the two passes must stay identical"
+            f"{spec.name}/{day}: pass A/B row mismatch ({len(epochs)} vs {len(df)})"
+            f" - the row-drop rules in the two passes must stay identical"
         )
 
     # --- derived: safe rates (no Inf by construction) ---------------------- #
@@ -144,6 +189,7 @@ def build_day(path) -> pd.DataFrame:
     df["attack_label"] = df["Label"]
     df["mdp_state"] = df["attack_label"].map(C.state_for_label)  # raises on unknown
     df["source_day"] = day
+    df[C.SOURCE_DATASET_COLUMN] = spec.name
 
     # --- final clean: Inf/NaN -> drop (checkpoint: isna().sum().sum() == 0) - #
     drop_subset = [c for c in C.OBS_FEATURES + ["Dst Port", "attack_label"]
@@ -151,75 +197,124 @@ def build_day(path) -> pd.DataFrame:
     df = df.replace([np.inf, -np.inf], np.nan)
     before = len(df)
     df = df.dropna(subset=drop_subset)
-    dropped = before - len(df)
-    if dropped:
-        print(f"  {day}: dropped {dropped} rows with Inf/NaN")
+    infnan_dropped = before - len(df)
+    if infnan_dropped:
+        print(f"  {spec.name}/{day}: dropped {infnan_dropped} rows with Inf/NaN")
 
     df = df[C.OBS_FEATURES + C.HIDDEN_COLUMNS]
-    df = df.sort_values("TimestampEpoch", kind="stable")
 
+    # --- exact duplicate rows within the file (quality control) ------------- #
+    # Identical raw flows produce identical derived rows, so this removes true
+    # duplicate records (a known ~9% issue in the CIC-IDS2017 exports).
+    before = len(df)
+    df = df.drop_duplicates()
+    dup_dropped = before - len(df)
+
+    df = df.sort_values("TimestampEpoch", kind="stable")
     df[C.OBS_FEATURES] = df[C.OBS_FEATURES].astype(np.float32)
-    for col in ("attack_label", "mdp_state", "source_day"):
+    for col in ("attack_label", "mdp_state", "source_day", C.SOURCE_DATASET_COLUMN):
         df[col] = df[col].astype(str)
     df["TimestampEpoch"] = df["TimestampEpoch"].astype(np.int64)
-    print(f"  {day}: {len(df):,} clean rows, "
-          f"{df['mdp_state'].value_counts().to_dict()}")
-    return df.reset_index(drop=True)
+
+    info = {
+        "source": spec.name,
+        "day": day,
+        "rows": len(df),
+        "dup_dropped": dup_dropped,
+        "infnan_dropped": infnan_dropped,
+        "is_holdout": day in spec.holdout_days,
+        "states": df["mdp_state"].value_counts().to_dict(),
+    }
+    print(f"  {spec.name}/{day}: {len(df):,} clean rows "
+          f"({dup_dropped:,} duplicate rows dropped), {info['states']}")
+    return df.reset_index(drop=True), info
 
 
-def fit_and_apply_scaler(train: pd.DataFrame, holdout: pd.DataFrame) -> dict:
-    """Z-score OBS_FEATURES using TRAIN statistics only; persist to scaler.json."""
+# --------------------------------------------------------------------------- #
+# Scaling + reporting
+# --------------------------------------------------------------------------- #
+def fit_and_apply_scaler(train: pd.DataFrame, holdouts: list[pd.DataFrame]) -> dict:
+    """Z-score OBS_FEATURES using the merged TRAIN statistics only; persist."""
     from sklearn.preprocessing import StandardScaler
 
     scaler = StandardScaler()
     train[C.OBS_FEATURES] = scaler.fit_transform(train[C.OBS_FEATURES])
-    holdout[C.OBS_FEATURES] = scaler.transform(holdout[C.OBS_FEATURES])
+    for holdout in holdouts:
+        holdout[C.OBS_FEATURES] = scaler.transform(holdout[C.OBS_FEATURES])
     train[C.OBS_FEATURES] = train[C.OBS_FEATURES].astype(np.float32)
-    holdout[C.OBS_FEATURES] = holdout[C.OBS_FEATURES].astype(np.float32)
+    for holdout in holdouts:
+        holdout[C.OBS_FEATURES] = holdout[C.OBS_FEATURES].astype(np.float32)
 
     payload = {
         "features": C.OBS_FEATURES,
         "mean": dict(zip(C.OBS_FEATURES, map(float, scaler.mean_))),
         "scale": dict(zip(C.OBS_FEATURES, map(float, scaler.scale_))),
-        "fit_on": "train split only (holdout Infiltration days excluded)",
+        "fit_on": "merged train split only (ids2018 + ids2017; all holdout days "
+                  "excluded)",
+        "sources": sorted(train[C.SOURCE_DATASET_COLUMN].unique().tolist()),
     }
     C.SCALER_JSON.write_text(json.dumps(payload, indent=2))
     return payload
 
 
-def write_report(train: pd.DataFrame, holdout: pd.DataFrame,
-                 files_used: list[str], skipped: list[str]) -> str:
-    """Day-1 checkpoint report: class balance + 5-row manual trace."""
-    lines: list[str] = ["# Day 1 report - dataset preprocessing", ""]
-    lines += [f"- Files processed: **{len(files_used)}**",
-              f"- Files skipped (missing): {skipped or 'none'}"]
-    if skipped:
-        lines += ["", "> NOTE: missing files - run `./download.sh` again."]
-    lines += ["", f"- Train rows: **{len(train):,}**  |  "
-                  f"Holdout rows: **{len(holdout):,}** (Infiltration days only)",
-              f"- Train days: {sorted(train['source_day'].unique())}",
-              f"- Holdout days: {sorted(holdout['source_day'].unique())}",
-              f"- Observation features ({len(C.OBS_FEATURES)}): {C.OBS_FEATURES}",
-              f"- Hidden (reward/eval only): {C.HIDDEN_COLUMNS}",
-              "", "## Checkpoint", "",
-              f"- `train.isna().sum().sum() == {int(train.isna().sum().sum())}`",
-              f"- `holdout.isna().sum().sum() == {int(holdout.isna().sum().sum())}`",
-              "", "## Class balance (train)", ""]
+def _per_source_balance(train: pd.DataFrame) -> str:
+    ct = (pd.crosstab(train[C.SOURCE_DATASET_COLUMN], train["mdp_state"])
+          .reindex(columns=list(C.STATES), fill_value=0))
+    ct["TOTAL"] = ct.sum(axis=1)
+    pct = (100 * ct[list(C.STATES)].div(ct["TOTAL"], axis=0)).round(2).add_suffix(" %")
+    return pd.concat([ct, pct], axis=1).to_markdown()
 
+
+def write_report(train: pd.DataFrame, holdouts: dict[str, pd.DataFrame],
+                 run_stats: list[dict], scaler_payload: dict) -> str:
+    """Day-1 checkpoint report: class balance, provenance, duplicates, trace."""
+    lines: list[str] = [
+        "# Dataset preprocessing Report",
+        "",
+        f"- Files processed: **{len(run_stats)}**",
+        "",
+        "## Sources",
+        "",
+        f"- Merged train rows: **{len(train):,}**",
+        f"- Train sources: {sorted(train[C.SOURCE_DATASET_COLUMN].unique())}",
+        f"- Observation features ({len(C.OBS_FEATURES)}): {C.OBS_FEATURES}",
+        f"- Hidden (reward/eval only): {C.HIDDEN_COLUMNS}",
+        f"- Scaler fit on: {scaler_payload['fit_on']}",
+        "",
+        "## Holdout splits (eval only, never trained on)",
+        "",
+    ]
+    for name, ho in holdouts.items():
+        lines.append(f"- `{name}`: **{len(ho):,}** rows, days "
+                     f"{sorted(ho['source_day'].unique())}")
+    lines += ["", "## Per-file processing (rows kept / duplicate rows dropped)", "",
+              "| source | file/day | rows kept | dup dropped | Inf/NaN dropped | holdout |",
+              "|---|---|---:|---:|---:|:--:|"]
+    for s in run_stats:
+        lines.append(f"| {s['source']} | {s['day']} | {s['rows']:,} | "
+                     f"{s['dup_dropped']:,} | {s['infnan_dropped']:,} | "
+                     f"{'yes' if s['is_holdout'] else ''} |")
+    lines += ["",
+              f"- Total duplicate rows dropped: "
+              f"**{sum(s['dup_dropped'] for s in run_stats):,}**", ""]
+
+    lines += ["", "## Checkpoint", "",
+              f"- `train.isna().sum().sum() == {int(train.isna().sum().sum())}`"]
+    for name, ho in holdouts.items():
+        lines.append(f"- `{name}.isna().sum().sum() == {int(ho.isna().sum().sum())}`")
+    lines += ["", "## Class balance (merged train)", ""]
     bal = (train["mdp_state"].value_counts()
            .reindex(C.STATES, fill_value=0).astype("int64").rename("rows")
            .to_frame())
     bal["percent"] = (100 * bal["rows"] / bal["rows"].sum()).round(2)
-    lines += [bal.to_markdown(), "", "### Per day x state (train)", "",
+    lines += [bal.to_markdown(), "", "### Per-source class balance (train)", "",
+              _per_source_balance(train), "",
+              "### Per day x state (train)", "",
               pd.crosstab(train["source_day"], train["mdp_state"])
               .reindex(columns=C.STATES, fill_value=0).to_markdown(), "",
-              "## Attack label inventory", "",
-              pd.concat([
-                  train.groupby("mdp_state")["attack_label"].value_counts()
-                       .rename("train_rows"),
-                  holdout.groupby("mdp_state")["attack_label"].value_counts()
-                         .rename("holdout_rows"),
-              ], axis=1).fillna(0).astype(int).to_markdown(), ""]
+              "## Attack label inventory (train)", "",
+              train.groupby([C.SOURCE_DATASET_COLUMN, "mdp_state"])["attack_label"]
+                   .value_counts().rename("rows").to_markdown(), ""]
 
     # 5-row manual trace: one exemplar per state + random extras.
     lines += ["## 5-row sample trace (label -> MDP state)", ""]
@@ -229,7 +324,7 @@ def write_report(train: pd.DataFrame, holdout: pd.DataFrame,
     extra_idx = rng.choice(len(train),
                            size=max(0, 5 - len(sample_parts)), replace=False)
     sample = pd.concat(sample_parts + [train.iloc[extra_idx]]).head(5)
-    trace = sample[["source_day", "attack_label", "mdp_state",
+    trace = sample[[C.SOURCE_DATASET_COLUMN, "source_day", "attack_label", "mdp_state",
                     "Dst Port Bucket", "Flow Pkts/s", "Active Conn Cnt"]].copy()
     trace["expected_state"] = trace["attack_label"].map(C.state_for_label)
     lines += [trace.to_markdown(index=False), "",
@@ -240,49 +335,84 @@ def write_report(train: pd.DataFrame, holdout: pd.DataFrame,
     return text
 
 
+def archive_baseline() -> None:
+    """Preserve the pre-integration IDS2018-only artifacts exactly once."""
+    if C.TRAIN_PARQUET.exists() and not C.TRAIN_IDS2018_ONLY_PARQUET.exists():
+        shutil.copyfile(C.TRAIN_PARQUET, C.TRAIN_IDS2018_ONLY_PARQUET)
+        print(f"Archived {C.TRAIN_IDS2018_ONLY_PARQUET.name}")
+    if C.SCALER_JSON.exists() and not C.SCALER_IDS2018_BASELINE_JSON.exists():
+        shutil.copyfile(C.SCALER_JSON, C.SCALER_IDS2018_BASELINE_JSON)
+        print(f"Archived {C.SCALER_IDS2018_BASELINE_JSON.name}")
+
+
 def main() -> int:
     C.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     frames: list[pd.DataFrame] = []
-    files_used, skipped = [], []
+    run_stats: list[dict] = []
 
-    for name in C.RAW_FILES:
-        path = C.RAW_DIR / name
-        if not path.exists():
-            print(f"MISSING {name}", file=sys.stderr)
-            skipped.append(name)
-            continue
-        print(f"Processing {name} ...")
-        day_df = build_day(path)
-        day_df.to_parquet(C.PROCESSED_DIR / f"day_{day_from_filename(path)}.parquet",
-                          index=False)
-        frames.append(day_df)
+    for spec in C.SOURCES:
+        if not spec.raw_dir.exists():
+            print(f"MISSING source dir {spec.raw_dir} - run ./download_ids2017.sh"
+                  if spec.name == C.SOURCE_2017 else
+                  f"MISSING source dir {spec.raw_dir} - run ./download.sh",
+                  file=sys.stderr)
+            return 1
+        day_done: set[str] = set()
+        for name in spec.files:
+            path = spec.raw_dir / name
+            if not path.exists():
+                print(f"MISSING [{spec.name}] {name}", file=sys.stderr)
+                continue
+            print(f"Processing [{spec.name}] {name} ...")
+            day_df, info = build_day(path, spec)
+            day_df.to_parquet(
+                C.PROCESSED_DIR / f"day_{spec.name}_{info['day']}.parquet",
+                index=False,
+            )
+            frames.append(day_df)
+            run_stats.append(info)
+            day_done.add(info["day"])
+        missing_holdout = set(spec.holdout_days) - day_done
+        if missing_holdout:
+            print(f"[{spec.name}] holdout day file(s) missing: "
+                  f"{sorted(missing_holdout)} - cannot build holdout split.",
+                  file=sys.stderr)
+            return 1
 
     if not frames:
-        print("No raw files found - run ./download.sh first.", file=sys.stderr)
-        return 1
-    missing_days = {day_from_filename(C.RAW_DIR / n) for n in skipped} & C.HOLDOUT_DAYS
-    if missing_days:
-        print(f"Holdout day file(s) missing: {sorted(missing_days)} - cannot build "
-              f"holdout split.", file=sys.stderr)
+        print("No raw files found.", file=sys.stderr)
         return 1
 
     all_df = pd.concat(frames, ignore_index=True)
     del frames
-    is_holdout = all_df["source_day"].isin(C.HOLDOUT_DAYS)
-    train, holdout = all_df[~is_holdout].copy(), all_df[is_holdout].copy()
+    is_holdout = pd.Series(False, index=all_df.index)
+    for spec in C.SOURCES:
+        is_holdout |= ((all_df[C.SOURCE_DATASET_COLUMN] == spec.name)
+                       & all_df["source_day"].isin(spec.holdout_days))
+    train = all_df[~is_holdout].copy()
+    holdout_2018 = all_df[is_holdout & (all_df[C.SOURCE_DATASET_COLUMN] == C.SOURCE_2018)].copy()
+    holdout_2017 = all_df[is_holdout & (all_df[C.SOURCE_DATASET_COLUMN] == C.SOURCE_2017)].copy()
     del all_df
-    print(f"Train: {len(train):,} rows | Holdout: {len(holdout):,} rows")
+    print(f"Train: {len(train):,} rows | "
+          f"IDS2018 holdout: {len(holdout_2018):,} rows | "
+          f"IDS2017 holdout: {len(holdout_2017):,} rows")
 
-    fit_and_apply_scaler(train, holdout)
+    archive_baseline()
+    scaler_payload = fit_and_apply_scaler(train, [holdout_2018, holdout_2017])
     train.to_parquet(C.TRAIN_PARQUET, index=False)
-    holdout.to_parquet(C.HOLDOUT_PARQUET, index=False)
+    holdout_2018.to_parquet(C.HOLDOUT_PARQUET, index=False)
+    holdout_2017.to_parquet(C.HOLDOUT_IDS2017_PARQUET, index=False)
 
-    report = write_report(train, holdout,
-                          files_used=[f for f in C.RAW_FILES if f not in skipped],
-                          skipped=skipped)
+    report = write_report(
+        train,
+        {"holdout_infiltration (ids2018)": holdout_2018,
+         "holdout_ids2017_portscan_ddos (ids2017)": holdout_2017},
+        run_stats, scaler_payload,
+    )
     print(report)
     print(f"\nWrote {C.TRAIN_PARQUET}\nWrote {C.HOLDOUT_PARQUET}\n"
-          f"Wrote {C.SCALER_JSON}\nWrote {C.REPORT_PATH}")
+          f"Wrote {C.HOLDOUT_IDS2017_PARQUET}\nWrote {C.SCALER_JSON}\n"
+          f"Wrote {C.REPORT_PATH}")
     return 0
 
 

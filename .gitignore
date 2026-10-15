@@ -22,9 +22,15 @@ data/processed/*.parquet
 data/processed/day_*.parquet
 
 # keep the small generated reports + scaler parameters in the repo
-!data/processed/day1_report.md
+# (the Day-1 report now lives at the repo root as "Dataset preprocessing Report.md",
+#  which is not ignored; data/processed/day1_report.md is no longer produced)
 !data/processed/day3_report.md
 !data/processed/scaler.json
+# Day-1 extension: archive of the pre-merge IDS2018-only scaler (Day-7 baseline)
+!data/processed/scaler_ids2018_baseline.json
+# Day-1 extension: per-source raw-data inspection evidence
+!data/processed/source_inspection_ids2017.md
+!data/processed/source_inspection_ids2017_trafficlabelling.md
 
 # --- OS / editors ---------------------------------------------------------- #
 .DS_Store

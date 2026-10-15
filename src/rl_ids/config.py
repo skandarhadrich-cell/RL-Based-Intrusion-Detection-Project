@@ -6,7 +6,9 @@ source of truth.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 # --------------------------------------------------------------------------- #
 # Paths
@@ -18,7 +20,17 @@ PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
 TRAIN_PARQUET = PROCESSED_DIR / "train.parquet"
 HOLDOUT_PARQUET = PROCESSED_DIR / "holdout_infiltration.parquet"
 SCALER_JSON = PROCESSED_DIR / "scaler.json"
-REPORT_PATH = PROCESSED_DIR / "day1_report.md"
+# The Day-1 report is presented at the repo root as a human-readable deliverable
+# (renamed from data/processed/day1_report.md). The generator writes *there* so
+# there is a single, always-current copy rather than a stale duplicate.
+REPORT_PATH = PROJECT_ROOT / "Dataset preprocessing Report.md"
+
+# Day-1 extension (CIC-IDS2017 integration): the IDS2017 eval-only split gets its
+# own file, and the pre-integration IDS2018-only artifacts are archived so the
+# Day-7 A/B can still be run against the original model/scaler.
+HOLDOUT_IDS2017_PARQUET = PROCESSED_DIR / "holdout_ids2017_portscan_ddos.parquet"
+TRAIN_IDS2018_ONLY_PARQUET = PROCESSED_DIR / "train_ids2018_only.parquet"
+SCALER_IDS2018_BASELINE_JSON = PROCESSED_DIR / "scaler_ids2018_baseline.json"
 
 # --------------------------------------------------------------------------- #
 # Dataset (CSE-CIC-IDS2018 processed CICFlowMeter exports, S3 bucket)
@@ -42,6 +54,144 @@ HOLDOUT_DAYS = frozenset({"Wednesday-28-02-2018", "Thursday-01-03-2018"})
 TIMESTAMP_FORMAT = "%d/%m/%Y %H:%M:%S"   # verified against raw files
 MIN_TIMESTAMP = "2010-01-01"              # rows before this have broken clocks (1970)
 EMBEDDED_HEADER_VALUE = "Timestamp"      # value in Timestamp col marks a duplicated header row
+
+# --------------------------------------------------------------------------- #
+# Multi-source layout (Day-1 extension): CSE-CIC-IDS2018 + CIC-IDS2017
+# --------------------------------------------------------------------------- #
+# Each source is described by one SourceSpec so the whole pipeline (preprocess,
+# env, reports, tests) is source-agnostic.  Downstream code never hardcodes a
+# dataset again: it iterates config.SOURCES.
+SOURCE_2018 = "ids2018"
+SOURCE_2017 = "ids2017"
+SOURCE_DATASET_COLUMN = "source_dataset"   # provenance column (hidden from the agent)
+
+# CIC-IDS2017 eval-only capture files: the PortScan file (Suspicious) and the
+# DDoS file (Compromised) are NEVER trained on and NEVER used to fit the scaler.
+HOLDOUT_DAYS_2017 = frozenset({
+    "Friday-WorkingHours-Afternoon-DDos",
+    "Friday-WorkingHours-Afternoon-PortScan",
+})
+
+# CIC-IDS2017 MachineLearningCVE column names -> the canonical CICFlowMeter-2018
+# names used everywhere in this project (leading spaces stripped first).  Every
+# feature we consume is a genuine same-semantics/units rename, never a guess:
+#   Destination Port -> Dst Port                (both: TCP/UDP destination port)
+#   Total Fwd Packets -> Tot Fwd Pkts           (both: packet count)
+#   Total Length of Fwd Packets -> TotLen Fwd Pkts (both: bytes)
+#   Packet Length Mean -> Pkt Len Mean          (both: bytes)
+#   * Flag Count -> * Flag Cnt                  (both: counts)
+IDS2017_RENAMES: dict[str, str] = {
+    "Destination Port": "Dst Port",
+    "Total Fwd Packets": "Tot Fwd Pkts",
+    "Total Backward Packets": "Tot Bwd Pkts",
+    "Total Length of Fwd Packets": "TotLen Fwd Pkts",
+    "Total Length of Bwd Packets": "TotLen Bwd Pkts",
+    "Packet Length Mean": "Pkt Len Mean",
+    "FIN Flag Count": "FIN Flag Cnt",
+    "SYN Flag Count": "SYN Flag Cnt",
+    "RST Flag Count": "RST Flag Cnt",
+    "PSH Flag Count": "PSH Flag Cnt",
+    "ACK Flag Count": "ACK Flag Cnt",
+    "URG Flag Count": "URG Flag Cnt",
+}
+
+# Rate columns CIC-IDS2017 ships (already computed by CICFlowMeter) -> canonical
+# names.  Our pipeline recomputes these from totals/duration, so these are used
+# only by the feature-parity cross-check (tests/test_day1_ids2017.py), never as
+# model input.
+IDS2017_SHIPPED_RATES: dict[str, str] = {
+    "Flow Packets/s": "Flow Pkts/s",
+    "Flow Bytes/s": "Flow Byts/s",
+    "Fwd Packets/s": "Fwd Pkts/s",
+    "Bwd Packets/s": "Bwd Pkts/s",
+}
+
+
+def _day_2018(filename: str) -> str:
+    """'Wednesday-14-02-2018_TrafficForML_CICFlowMeter.csv' -> 'Wednesday-14-02-2018'."""
+    return filename.split("_")[0]
+
+
+def _day_2017(filename: str) -> str:
+    """'Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv' -> day stem."""
+    return filename.split(".")[0]
+
+
+@dataclass(frozen=True)
+class SourceSpec:
+    """Everything source-specific, kept in one place per dataset."""
+
+    name: str                              # SOURCE_2018 / SOURCE_2017
+    raw_dir: Path                          # folder holding the raw CSVs
+    files: tuple[str, ...]                 # raw CSV filenames to process
+    timestamp_col: str                     # name of the timestamp column
+    timestamp_format: str                  # primary strptime format
+    min_timestamp: str                     # rows before this have broken clocks
+    embedded_header_value: str | None      # a value that marks an embedded header row
+    holdout_days: frozenset[str]           # day keys that must never be trained on
+    day_of: Callable[[str], str]           # filename -> day key
+    renames: dict[str, str] = field(default_factory=dict)  # raw(stripped) -> canonical
+    encoding: str | None = None            # CSV text encoding
+    alternate_timestamp_formats: tuple[str, ...] = ()   # fallbacks for mixed formats
+
+    def canonical(self, raw_column: str) -> str:
+        """Canonical project column name for a raw (possibly space-padded) header."""
+        key = raw_column.strip()
+        return self.renames.get(key, key)
+
+
+IDS2018_SPEC = SourceSpec(
+    name=SOURCE_2018,
+    raw_dir=RAW_DIR,
+    files=tuple(RAW_FILES),
+    timestamp_col="Timestamp",
+    timestamp_format=TIMESTAMP_FORMAT,
+    min_timestamp=MIN_TIMESTAMP,
+    embedded_header_value=EMBEDDED_HEADER_VALUE,
+    holdout_days=HOLDOUT_DAYS,
+    day_of=_day_2018,
+    renames={},
+    encoding=None,
+)
+
+# CIC-IDS2017 raw directory (GeneratedLabelledFlows / "TrafficLabelling" export:
+# it adds Timestamp + Flow ID + IPs to the MachineLearningCVE columns, which is
+# what lets us recompute Active Conn Cnt with the identical sweep-line code).
+IDS2017_DIR = RAW_DIR / "ids2017" / "TrafficLabelling"
+
+IDS2017_SPEC = SourceSpec(
+    name=SOURCE_2017,
+    raw_dir=IDS2017_DIR,
+    files=(
+        "Monday-WorkingHours.pcap_ISCX.csv",
+        "Tuesday-WorkingHours.pcap_ISCX.csv",
+        "Wednesday-workingHours.pcap_ISCX.csv",
+        "Thursday-WorkingHours-Morning-WebAttacks.pcap_ISCX.csv",
+        "Thursday-WorkingHours-Afternoon-Infilteration.pcap_ISCX.csv",
+        "Friday-WorkingHours-Morning.pcap_ISCX.csv",
+        "Friday-WorkingHours-Afternoon-DDos.pcap_ISCX.csv",
+        "Friday-WorkingHours-Afternoon-PortScan.pcap_ISCX.csv",
+    ),
+    timestamp_col="Timestamp",
+    # Verified against the raw files: CICFlowMeter-2017 emits MINUTE resolution
+    # ("7/7/2017 1:00"), vs CICFlowMeter-2018's second resolution.  The derived
+    # Active Conn Cnt therefore has the same meaning/units but coarser temporal
+    # granularity for 2017 (documented in docs/day1.md).
+    timestamp_format="%d/%m/%Y %H:%M",
+    min_timestamp=MIN_TIMESTAMP,
+    embedded_header_value=None,
+    holdout_days=HOLDOUT_DAYS_2017,
+    day_of=_day_2017,
+    renames=IDS2017_RENAMES,
+    encoding="latin-1",
+    # The CIC-IDS2017 exports mix formats ACROSS files: minute resolution
+    # ("7/7/2017 1:00") almost everywhere, but Monday-WorkingHours uses seconds
+    # ("03/07/2017 08:55:58").  Try minute first, then seconds.
+    alternate_timestamp_formats=("%d/%m/%Y %H:%M:%S",),
+)
+
+SOURCES: tuple[SourceSpec, ...] = (IDS2018_SPEC, IDS2017_SPEC)
+SOURCES_BY_NAME: dict[str, SourceSpec] = {s.name: s for s in SOURCES}
 
 # --------------------------------------------------------------------------- #
 # MDP states and label mapping
@@ -83,17 +233,38 @@ LABEL_TO_STATE: dict[str, str] = {
     "web attack - xss": "Compromised",
     "web attack - sql injection": "Compromised",
     "heartbleed": "Compromised",
+    # --- CIC-IDS2017 label spellings (space instead of hyphen; "-Patator" for
+    #     brute force; en-dash in "Web Attack <dash> ...") --------------------- #
+    "dos hulk": "Compromised",
+    "dos goldeneye": "Compromised",
+    "dos slowloris": "Compromised",
+    "dos slowhttptest": "Compromised",
+    "ftp-patator": "Suspicious",
+    "ssh-patator": "Suspicious",
 }
+
+# Dash-like code points that appear in raw labels: en/em dashes, the cp1252
+# mojibake byte 0x96 (read as U+0096 under latin-1) and U+FFFD (utf-8 replace).
+_DASH_LIKE = ("\u2010", "\u2011", "\u2012", "\u2013", "\u2014", "\u2015",
+              "\u0096", "\u0097", "\ufffd")
+
+
+def _normalize_label_key(label: str) -> str:
+    """Lower-case/strip and collapse every dash variant to an ASCII hyphen."""
+    key = str(label).strip().lower()
+    for dash in _DASH_LIKE:
+        key = key.replace(dash, "-")
+    return key
 
 
 def state_for_label(label: str) -> str:
     """Map a raw dataset label to its MDP state. Raises on unknown labels.
 
-    Some days use 'DoS attacks-GoldenEye' where others use 'DoS-GoldenEye'
-    or 'DDOS attack-HOIC'; fall back to normalized keys (infix ' attack(s)'
-    removed) before giving up.
+    Normalises dash-like characters first (the CIC-IDS2017 exports encode the
+    'Web Attack - *' en-dash as cp1252 byte 0x96), then falls back to normalized
+    keys (infix ' attack(s)' removed) before giving up.
     """
-    key = str(label).strip().lower()
+    key = _normalize_label_key(label)
     for candidate in (key, key.replace(" attacks", ""), key.replace(" attack", "")):
         if candidate in LABEL_TO_STATE:
             return LABEL_TO_STATE[candidate]
@@ -145,7 +316,10 @@ OBS_FEATURES: list[str] = [
 ]
 
 # Columns kept for reward computation / evaluation only - NEVER observed.
-HIDDEN_COLUMNS: list[str] = ["attack_label", "mdp_state", "TimestampEpoch", "source_day"]
+HIDDEN_COLUMNS: list[str] = [
+    "attack_label", "mdp_state", "TimestampEpoch", "source_day",
+    SOURCE_DATASET_COLUMN,
+]
 
 # Derived numeric columns produced by preprocessing (subset of OBS_FEATURES).
 DERIVED_COLUMNS: list[str] = [

@@ -4,6 +4,12 @@
 
 **Status: DONE** — all 10 checkpoint tests pass on the full 10-day dataset.
 
+> **Extension (this revision):** CIC-IDS2017 is integrated as a **second training
+> source** (controlled data-source experiment). See
+> [Day-1 extension — CIC-IDS2017 integration](#day-1-extension--cic-ids2017-integration).
+> The 2018-only pipeline above is preserved byte-for-byte as the Day-7 baseline
+> (`train_ids2018_only.parquet`, `scaler_ids2018_baseline.json`).
+
 ---
 
 ## What was done
@@ -93,7 +99,7 @@ and SQLi rows are few (611/230/87) but present.
 - `data/raw/*.csv` (10 files, ~6.9 GB) — raw CICFlowMeter exports
 - `data/processed/train.parquet` (15.2 M rows), `holdout_infiltration.parquet` (935 k)
 - `data/processed/scaler.json` — z-score params fit on train only
-- `data/processed/day1_report.md` — auto-generated pipeline report
+- `Dataset preprocessing Report.md` (repo root) — auto-generated pipeline report
 - `src/rl_ids/{config.py, preprocess.py}` · `tests/test_day1.py` · `download.sh`
 
 ## How to run
@@ -101,6 +107,137 @@ and SQLi rows are few (611/230/87) but present.
 ```bash
 ~/venvs/rl-ids/bin/python -m rl_ids.preprocess     # rebuild everything
 ~/venvs/rl-ids/bin/python -m pytest tests/test_day1.py -v
+```
+
+---
+
+## Day-1 extension — CIC-IDS2017 integration
+
+**Goal:** add CIC-IDS2017 as a *second training source* without changing the
+17-feature observation schema, then (Day 7) A/B the original 2018-only model
+against the merged-data model on identical, untouched eval sets.
+
+### 1. Why the `TrafficLabelling` archive (not `MachineLearningCVE`)
+
+Both CIC-IDS2017 downloads were fetched (see `download_ids2017.sh`) and inspected
+(`inspect_source.py --encoding latin-1` → `data/processed/source_inspection_ids2017*.md`):
+
+| Archive | `Timestamp`? | Verdict |
+|---|---|---|
+| `MachineLearningCVE/` | **no** | rejected — cannot derive `Active Conn Cnt` |
+| `TrafficLabelling/` | **yes** | **used** |
+
+`Active Conn Cnt` is a *derived* feature (sweep-line count of concurrent flows at
+each flow start). The MachineLearningCVE export has no timestamps, so that feature
+could not be computed without fabricating it. The timestamped TrafficLabelling
+export lets us run the **identical derivation code** for both datasets. Per-file
+valid row counts in TrafficLabelling match MachineLearningCVE for all 8 files
+(the WebAttacks file carries 288,602 trailing junk rows, auto-dropped by the
+timestamp mask: valid 170,366 = MachineLearningCVE count).
+
+### 2. Feature parity (same meaning & units, not just names)
+
+2017 column names are mapped onto the canonical schema (`config.IDS2017_RENAMES`);
+every canonical raw column is producible from a 2017 header. Parity is verified on
+raw data by `tests/test_day1_ids2017.py::test_recomputed_rates_match_2017_shipped_rates`:
+our recomputed `Flow Pkts/s` / `Flow Byts/s` (from `Total Fwd+Bwd Packets` /
+`TotLen Fwd+Bwd` ÷ `Flow Duration` in seconds) reproduce the rate columns
+CIC-IDS2017 **ships itself** with median relative error < 1% and correlation > 0.999
+— confirming identical units (packets/s, bytes/s, microsecond duration) across both
+datasets.
+
+`Active Conn Cnt` is *derived* for 2017, never zero-filled: the integration test
+asserts it is non-constant with a wide spread after standardization (a zero-fill
+would collapse to a single constant).
+
+### 3. Timestamp granularity caveat (known limitation)
+
+2017 timestamps come in two formats, both handled (`alternate_timestamp_formats`):
+
+- minute resolution `%d/%m/%Y %H:%M` (`7/7/2017 1:00`) in almost all files;
+- second resolution `%d/%m/%Y %H:%M:%S` (`03/07/2017 08:55:58`) on the Monday file.
+
+Consequence: 2017 `Active Conn Cnt` has the **same meaning and units** but a
+**coarser (minute) resolution** and an ambiguous 12-hour clock. It is therefore a
+noisier concurrency signal than the 2018 (second-resolution) values — documented,
+not corrected.
+
+### 4. Cleaning & de-duplication
+
+The 2018 pipeline above originally kept duplicate rows. This revision drops
+**exact duplicate rows** (uniformly across both sources) and reports counts
+(`Dataset preprocessing Report.md`): **1,169,192** duplicates removed
+(786,067 in 2018, 383,125 in 2017). Inf/NaN handling, the 1970-clock guard and the
+rate recomputation are unchanged.
+
+> Note: the drop applies to **every** file, holdout files included, so the 2018
+> Infiltration holdout shrank 935,083 → **701,039** rows (same two days, never
+> trained on, never scaler-fit). Both Day-7 arms are evaluated on this *same*
+> holdout, so the A/B remains fair.
+
+### 5. Splits (eval-only, never trained on, never scaler-fit)
+
+| Split | Rows | Days |
+|---|---:|---|
+| `holdout_infiltration` (ids2018) | 701,039 | `Wednesday-28-02-2018`, `Thursday-01-03-2018` |
+| `holdout_ids2017_portscan_ddos` (ids2017) | 346,574 | `…Afternoon-DDos` (Compromised), `…Afternoon-PortScan` (Suspicious) |
+
+### 6. Results — merged train
+
+| Split | Rows |
+|---|---:|
+| **Merged train** | **16,748,125** |
+| — ids2018 | 14,650,066 |
+| — ids2017 | 2,098,059 |
+
+**Class balance (merged train):** Normal 85.68% (14.35 M) · Suspicious 1.00%
+(168,001) · Compromised 13.32% (2.23 M).
+
+**Per source:**
+
+| source | Normal | Suspicious | Compromised | Normal % | Susp % | Comp % |
+|---|---:|---:|---:|---:|---:|---:|
+| ids2018 | 12,460,503 | 156,643 | 2,032,920 | 85.05 | 1.07 | 13.88 |
+| ids2017 | 1,889,519 | 11,358 | 197,185 | 90.06 | 0.54 | 9.40 |
+
+The 2017 Suspicious rows (FTP-Patator 6,330 + SSH-Patator 5,028) are the new
+signal the merge adds; 2017 also contributes DoS (Hulk/GoldenEye/Slowloris/Slowhttptest),
+Bot, Web-Attack, Heartbleed and 36 Infiltration rows (see the label inventory in
+`Dataset preprocessing Report.md`).
+
+### 7. Label policy & provenance
+
+`config.LABEL_TO_STATE` now resolves the 2017 spellings (`DoS Hulk`, `DoS GoldenEye`,
+`DoS slowloris`, `DoS Slowhttptest`, `FTP-Patator`, `SSH-Patator`), including labels
+carrying a cp1252 en-dash byte (`Web Attack \x96 Brute Force`). The original attack
+string is preserved (`attack_label`) alongside a new hidden provenance column
+**`source_dataset`** (`ids2018` / `ids2017`) and `source_day`. All three are
+reward/eval-only and excluded from `OBS_FEATURES`.
+
+### 8. Scalers
+
+- `scaler.json` — refit on the **merged train only** (both sources; all holdout days
+  excluded); applied to train and both holdouts.
+- `scaler_ids2018_baseline.json` — archived copy of the original 2018-only scaler,
+  used by the Day-7 baseline arm.
+
+### 9. Tests
+
+- `tests/test_day1.py` — refactored `test_holdout_isolation` for two holdouts +
+  `test_merged_provenance` + provenance in the leakage guard.
+- `tests/test_day1_ids2017.py` — 2017 holdout content/isolation, observation-schema
+  invariance, derived-vs-zero-filled `Active Conn Cnt`, canonical-column coverage,
+  shipped-rate parity, and the full 2017 label→state policy.
+
+Full suite: **88 passed**.
+
+### How to rebuild
+
+```bash
+./download_ids2017.sh                                  # fetch + unpack both 2017 archives
+~/venvs/rl-ids/bin/python -m rl_ids.inspect_source --help
+PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.preprocess
+~/venvs/rl-ids/bin/python -m pytest tests/ -q
 ```
 
 ---

@@ -49,15 +49,30 @@ def test_no_nan_no_inf(train, holdout):
 # 2. Holdout isolation: Infiltration days never appear in train
 # --------------------------------------------------------------------------- #
 def test_holdout_isolation(train, holdout):
+    # IDS2018 Infiltration-day holdout: those days must never appear in train.
     train_days = set(train["source_day"].unique())
     holdout_days = set(holdout["source_day"].unique())
     assert holdout_days == set(C.HOLDOUT_DAYS), f"unexpected holdout days {holdout_days}"
     assert not (train_days & holdout_days), "holdout days leaked into training"
-    expected_raw = {p.name.split("_")[0] for p in C.RAW_DIR.glob("*.csv")}
-    assert expected_raw == (train_days | holdout_days), (
-        f"day mismatch: raw={sorted(expected_raw)} "
-        f"processed={sorted(train_days | holdout_days)}"
+
+    # IDS2017 has its own eval-only split (PortScan + DDoS capture files).
+    assert C.HOLDOUT_IDS2017_PARQUET.exists(), "run preprocess to build the 2017 holdout"
+    holdout2017 = pd.read_parquet(C.HOLDOUT_IDS2017_PARQUET)
+    holdout2017_days = set(holdout2017["source_day"].unique())
+    assert holdout2017_days == set(C.HOLDOUT_DAYS_2017), (
+        f"unexpected 2017 holdout days {holdout2017_days}"
     )
+    assert not (train_days & holdout2017_days), "2017 holdout days leaked into training"
+
+    # Every raw day across every source is accounted for exactly once, and the
+    # two holdout tables are single-source (no cross-dataset leakage).
+    expected_raw = {spec.day_of(name) for spec in C.SOURCES for name in spec.files}
+    processed = train_days | holdout_days | holdout2017_days
+    assert expected_raw == processed, (
+        f"day mismatch: raw={sorted(expected_raw)} processed={sorted(processed)}"
+    )
+    assert set(holdout["source_dataset"].unique()) == {C.SOURCE_2018}
+    assert set(holdout2017["source_dataset"].unique()) == {C.SOURCE_2017}
 
 
 # --------------------------------------------------------------------------- #
@@ -79,11 +94,22 @@ def test_all_three_states_present(train):
 # --------------------------------------------------------------------------- #
 # 4. No label leakage into observations
 # --------------------------------------------------------------------------- #
+def test_merged_provenance(train):
+    """The merged train carries both sources and a hidden provenance column."""
+    assert C.SOURCE_DATASET_COLUMN in train.columns
+    present = set(train[C.SOURCE_DATASET_COLUMN].unique())
+    assert present == {C.SOURCE_2018, C.SOURCE_2017}, f"unexpected sources {present}"
+    # CIC-IDS2017 training rows really contributed Suspicious traffic (FTP/SSH
+    # brute force), which is the point of the merge.
+    ids2017 = train[train[C.SOURCE_DATASET_COLUMN] == C.SOURCE_2017]
+    assert (ids2017["mdp_state"] == "Suspicious").any()
+
+
 def test_no_label_leakage():
     overlap = set(C.OBS_FEATURES) & set(C.HIDDEN_COLUMNS)
     assert not overlap, f"hidden columns leaked into OBS_FEATURES: {overlap}"
     for forbidden in ("attack_label", "mdp_state", "Label", "source_day",
-                      "TimestampEpoch"):
+                      "TimestampEpoch", C.SOURCE_DATASET_COLUMN):
         assert forbidden not in C.OBS_FEATURES
 
 
