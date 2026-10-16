@@ -111,6 +111,12 @@ the benign false-alarm rate. Corrupted observations:
 Each row is a **within-architecture** ablation: same network, seed, episodes and
 pool cap; only the training data changed.
 
+**Caveat.** The PortScan test is the last 20% of the PortScan day, i.e. a
+**within-day temporal split** time-adjacent to the PortScan training portion — so
+its gain is an optimistic bound. The Infiltration test is a **separate day**
+(Thu-01 vs Wed-28) and is clean, so its smaller movement is the conservative
+reading.
+
 ![Coverage ablation confusion matrices](../data/processed/coverage_ablation_confusion.png)
 
 ## 6. Reading the result
