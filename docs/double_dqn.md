@@ -100,10 +100,36 @@ matches the expected `Normal→Monitor`, `Suspicious→Honeypot`, `Compromised�
 It raises (rather than writing a report) if the greedy policy fails to beat the
 random baseline outright — a wiring bug, not under-training.
 
-## 6. Results
+## 6. Results (5 000 episodes, seed 7)
 
-_Pending the RAM upgrade: the online run loads real-flow observation pools into
-memory, so run it after raising VM RAM (or lower `MAX_ROWS_PER_STATE`)._
+21 600 steps · 19 601 gradient updates · final ε = 0.050.
+
+**Learned policy — matches the expected optimum in every bucket:**
+
+| Start state | Dominant greedy action | Expected | Match |
+|---|---|---|---|
+| Normal | Monitor | Monitor | ✅ |
+| Suspicious | Honeypot | Honeypot | ✅ |
+| Compromised | Block | Block | ✅ |
+
+**Returns (greedy over 1 000 episodes/state vs a uniform-random policy and the
+exact Bellman optimum):**
+
+| Start state | Greedy | Random | Bellman optimum |
+|---|---:|---:|---:|
+| Normal | **+8.58** | +3.72 | +8.72 |
+| Suspicious | **+20.17** | +5.18 | +23.16 |
+| Compromised | **+14.39** | +6.36 | +14.51 |
+
+The greedy policy beats the random baseline in **every** bucket. Normal and
+Compromised land within ≈0.15 of the exact optimum. Suspicious shows a ≈3-point
+gap: it is the only bucket where the hidden state must be inferred from a
+*resolution-biased* reward (Honeypot resolves to Normal only ~30% of the time,
+so per-episode returns are high-variance, σ ≈ 21), and the agent occasionally
+misreads a Suspicious flow from telemetry — the dominant action is still the
+optimal one.
+
+![Double DQN learning curve](../data/processed/double_dqn_learning_curve.png)
 
 ```
 PYTHONPATH=src python -m rl_ids.train_dqn

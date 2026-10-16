@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=for-the-badge&logo=pytorch" />
   <img src="https://img.shields.io/badge/Gymnasium-1.x-green?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Dataset-CSE--CIC--IDS2018%20%2B%20CIC--IDS2017-orange?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Status-DQN%20phase-yellow?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Status-Double%20DQN%20done-brightgreen?style=for-the-badge" />
 </p>
 
 > An autonomous network intrusion-detection and response agent trained with
@@ -352,7 +352,7 @@ replace `python` with its interpreter if needed.)*
 | Gymnasium environment | ✅ done | [`docs/environment.md`](docs/environment.md) |
 | Reward function | ✅ done | [`docs/reward_function.md`](docs/reward_function.md) |
 | Tabular MC sanity check | ✅ done | [`docs/tabular_mc_control.md`](docs/tabular_mc_control.md) |
-| Double DQN | 🔨 implemented (run pending RAM) | [`docs/double_dqn.md`](docs/double_dqn.md) |
+| Double DQN | ✅ done | [`docs/double_dqn.md`](docs/double_dqn.md) |
 | Prioritized Experience Replay | ⏳ planned | — |
 
 ---
@@ -375,6 +375,18 @@ the underlying MDP.
 
 ![Q-value trajectories vs Bellman targets](data/processed/tabular_mc_control_learning_curve.png)
 
+The **Double DQN** agent (5,000 episodes, seed 7) then recovers the *same*
+optimal response policy from the partially-observable telemetry alone, beating a
+uniform-random policy in every bucket:
+
+| Start state | Greedy action | Greedy return | Random | Bellman optimum |
+|-------------|---------------|--------------:|-------:|----------------:|
+| Normal | Monitor | 8.58 | 3.72 | 8.72 |
+| Suspicious | Honeypot | 20.17 | 5.18 | 23.16 |
+| Compromised | Block | 14.39 | 6.36 | 14.51 |
+
+![Double DQN learning curve](data/processed/double_dqn_learning_curve.png)
+
 ---
 
 ## 🗺️ Roadmap
@@ -383,7 +395,7 @@ the underlying MDP.
 - [x] Partial-observability Gymnasium environment
 - [x] Pure reward model + worked-example verification
 - [x] Tabular Monte-Carlo control vs exact Bellman solution
-- [~] Double DQN with target network (implemented; training run pending RAM)
+- [x] Double DQN with target network (recovers the optimal response policy)
 - [ ] Prioritized Experience Replay
 - [ ] Per-class precision / recall / F1 / FPR on the untouched holdouts
 
