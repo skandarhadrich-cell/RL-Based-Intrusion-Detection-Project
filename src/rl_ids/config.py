@@ -441,3 +441,16 @@ DQN_REPORT_PATH = PROCESSED_DIR / "double_dqn_report.md"
 DQN_CURVE_PNG = PROCESSED_DIR / "double_dqn_learning_curve.png"
 MODELS_DIR = PROJECT_ROOT / "models"
 DQN_MODEL_PATH = MODELS_DIR / "double_dqn.pt"
+
+# --------------------------------------------------------------------------- #
+# Prioritized Experience Replay (proportional, sum-tree) - PER phase
+# --------------------------------------------------------------------------- #
+PER_ALPHA = 0.6             # priority exponent: P(i) ∝ (|TD| + eps)^alpha
+PER_BETA_START = 0.4        # importance-sampling exponent at the start
+PER_BETA_END = 1.0          # ... annealed linearly to 1.0 (fully corrected)
+PER_BETA_STEPS = 20_000     # updates over which beta is annealed
+PER_EPS = 1e-5              # priority floor, keeps every transition sampleable
+
+PER_REPORT_PATH = PROCESSED_DIR / "prioritized_replay_report.md"
+PER_CURVE_PNG = PROCESSED_DIR / "prioritized_replay_learning_curve.png"
+PER_MODEL_PATH = MODELS_DIR / "double_dqn_per.pt"

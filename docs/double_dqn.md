@@ -64,8 +64,9 @@ for episode:
 - **Exploring starts** (uniform over buckets) mirror the tabular checkpoint: a
   Normal-only start reaches Suspicious in <1% of episodes and would starve its
   action-values.
-- **Uniform replay** for now; **prioritized** replay is the next phase and will
-  swap in behind the same `ReplayBuffer.sample` interface.
+- **Uniform replay** here; **prioritized** replay is delivered in
+  [`prioritized_replay.md`](prioritized_replay.md), reusing the same
+  `ReplayBuffer` array storage behind a new sampler.
 
 ## 4. Hyper-parameters
 

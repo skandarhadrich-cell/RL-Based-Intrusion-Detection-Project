@@ -17,7 +17,7 @@ VM RAM (or lower ``MAX_ROWS_PER_STATE``) before running.
 """
 from __future__ import annotations
 
-from collections import Counter, deque
+from collections import deque
 
 import numpy as np
 import matplotlib
@@ -25,8 +25,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from rl_ids import config as C
-from rl_ids.dqn import DoubleDQNAgent, ReplayBuffer, epsilon_schedule, legal_indices
+from rl_ids.dqn import DoubleDQNAgent, ReplayBuffer, epsilon_schedule
 from rl_ids.env import IDSEnv2018
+from rl_ids.evaluate import evaluate_greedy, evaluate_random
 from rl_ids.tabular import SIDX, bellman_solution
 
 # --------------------------------------------------------------------------- #
@@ -41,55 +42,6 @@ SEED = 7
 
 EXPECTED_POLICY = {"Normal": "Monitor", "Suspicious": "Honeypot",
                    "Compromised": "Block"}
-
-
-# --------------------------------------------------------------------------- #
-# evaluation helpers
-# --------------------------------------------------------------------------- #
-def _rollout(agent, env, start, seed, episodes):
-    """Greedy-policy returns from a fixed start state; also counts 1st action."""
-    rets = np.empty(episodes)
-    first_actions: Counter[int] = Counter()
-    for k in range(episodes):
-        obs, info = env.reset(seed=seed + k, options={"state": start})
-        mask = info["action_mask"]
-        first_actions[agent.greedy(obs, mask)] += 1
-        g, disc, done = 0.0, 1.0, False
-        while not done:
-            a = agent.greedy(obs, mask)
-            obs, r, term, trunc, info = env.step(a)
-            mask = info["action_mask"]
-            g += disc * float(r)
-            disc *= C.GAMMA
-            done = term or trunc
-        rets[k] = g
-    dominant = C.ACTIONS[first_actions.most_common(1)[0][0]]
-    return float(rets.mean()), float(rets.std()), dominant, first_actions
-
-
-def evaluate_greedy(agent, env, seed, episodes=EVAL_EPISODES):
-    return {s: _rollout(agent, env, s, seed, episodes) for s in C.STATES}
-
-
-def evaluate_random(env, seed, episodes=RANDOM_EPISODES):
-    rng = np.random.default_rng(seed)
-    out = {}
-    for s in C.STATES:
-        rets = np.empty(episodes)
-        for k in range(episodes):
-            obs, info = env.reset(seed=seed + k, options={"state": s})
-            mask = info["action_mask"]
-            g, disc, done = 0.0, 1.0, False
-            while not done:
-                a = int(rng.choice(legal_indices(mask)))
-                obs, r, term, trunc, info = env.step(a)
-                mask = info["action_mask"]
-                g += disc * float(r)
-                disc *= C.GAMMA
-                done = term or trunc
-            rets[k] = g
-        out[s] = (float(rets.mean()), float(rets.std()))
-    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -139,8 +91,8 @@ def main() -> None:
     # ---------------------------------------------------------------------- #
     # evaluation
     # ---------------------------------------------------------------------- #
-    greedy = evaluate_greedy(agent, env, seed=SEED + 90_000)
-    random_base = evaluate_random(env, seed=SEED + 95_000)
+    greedy = evaluate_greedy(agent, env, seed=SEED + 90_000, episodes=EVAL_EPISODES)
+    random_base = evaluate_random(env, seed=SEED + 95_000, episodes=RANDOM_EPISODES)
 
     Qb = bellman_solution()
     optimum = {s: float(np.max(Qb[SIDX[s], list(C.VALID_ACTIONS[s])])) for s in C.STATES}

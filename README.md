@@ -5,7 +5,7 @@
   <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=for-the-badge&logo=pytorch" />
   <img src="https://img.shields.io/badge/Gymnasium-1.x-green?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Dataset-CSE--CIC--IDS2018%20%2B%20CIC--IDS2017-orange?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Status-Double%20DQN%20done-brightgreen?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Status-Double%20DQN%20%2B%20PER%20done-brightgreen?style=for-the-badge" />
 </p>
 
 > An autonomous network intrusion-detection and response agent trained with
@@ -55,7 +55,7 @@ reference before the next one is added:
    payoffs and operating costs.
 4. **Tabular sanity check** — first-visit Monte-Carlo control on a 3-state
    abstraction, checked against the exact Bellman solution.
-5. **Deep RL** — **Double DQN** with a target network, then **Prioritized
+5. **Deep RL** — **Double DQN** with a target network and **Prioritized
    Experience Replay**.
 
 Everything is organized so a single label→state mapping, feature list, and
@@ -223,22 +223,27 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── train_tabular.py     # tabular sanity-check driver (report + curve)
 │   ├── dqn.py               # Double DQN agent: network, replay, masked update
 │   ├── train_dqn.py         # Double DQN training driver (report + curve)
+│   ├── per.py               # sum-tree prioritized replay buffer + β schedule
+│   ├── evaluate.py          # shared greedy/random rollout evaluation
+│   ├── train_per.py         # PER training driver (report + curve)
 │   └── validate_reward.py   # reward verification report + replay check
 │
-├── tests/                   # pytest suite (105 tests)
+├── tests/                   # pytest suite (119 tests)
 │   ├── test_dataset_preprocessing.py
 │   ├── test_ids2017_integration.py
 │   ├── test_environment.py
 │   ├── test_reward_function.py
 │   ├── test_tabular_mc_control.py
-│   └── test_dqn.py
+│   ├── test_dqn.py
+│   └── test_per.py
 │
 ├── docs/
 │   ├── dataset_preprocessing.md   # acquisition, cleaning, merge, splits
 │   ├── environment.md             # MDP, transitions, observation model
 │   ├── reward_function.md         # reward design + worked example
 │   ├── tabular_mc_control.md      # MC control vs exact Bellman solution
-│   └── double_dqn.md              # Double DQN agent design + training
+│   ├── double_dqn.md              # Double DQN agent design + training
+│   └── prioritized_replay.md      # prioritized replay: sum-tree, IS, results
 │
 ├── data/
 │   ├── raw/                 # downloaded CSVs (git-ignored)
@@ -333,7 +338,17 @@ This is the heavy online step: it loads real-flow observation pools into memory,
 so give the machine enough RAM (or lower `MAX_ROWS_PER_STATE` in
 `src/rl_ids/train_dqn.py`).
 
-### 6. Run the test suite
+### 6. Train with Prioritized Experience Replay
+
+```bash
+PYTHONPATH=src python -m rl_ids.train_per         # -> prioritized_replay_report.md + curve + models/double_dqn_per.pt
+```
+
+Same agent and settings as step 5, but with proportional prioritized replay
+(sum-tree sampling + importance-sampling correction). It is the other heavy
+online step.
+
+### 7. Run the test suite
 
 ```bash
 python -m pytest tests/ -q
@@ -353,7 +368,7 @@ replace `python` with its interpreter if needed.)*
 | Reward function | ✅ done | [`docs/reward_function.md`](docs/reward_function.md) |
 | Tabular MC sanity check | ✅ done | [`docs/tabular_mc_control.md`](docs/tabular_mc_control.md) |
 | Double DQN | ✅ done | [`docs/double_dqn.md`](docs/double_dqn.md) |
-| Prioritized Experience Replay | ⏳ planned | — |
+| Prioritized Experience Replay | ✅ done | [`docs/prioritized_replay.md`](docs/prioritized_replay.md) |
 
 ---
 
@@ -387,6 +402,21 @@ uniform-random policy in every bucket:
 
 ![Double DQN learning curve](data/processed/double_dqn_learning_curve.png)
 
+Adding **Prioritized Experience Replay** (same agent, environment, episodes and
+seed — only the buffer changes) keeps the optimal policy in every bucket and
+sharpens the one bucket that had room to improve:
+
+| Start state | Uniform greedy | PER greedy | Random | Bellman optimum |
+|-------------|---------------:|-----------:|-------:|----------------:|
+| Normal | 8.58 | 8.47 | 3.72 | 8.72 |
+| Suspicious | 20.17 | **20.65** | 5.18 | 23.16 |
+| Compromised | 14.39 | 14.30 | 6.36 | 14.51 |
+
+The Suspicious gap to the exact optimum shrinks **2.99 → 2.51**; Normal and
+Compromised were already within ≈0.15 and barely move.
+
+![PER learning curve](data/processed/prioritized_replay_learning_curve.png)
+
 ---
 
 ## 🗺️ Roadmap
@@ -396,7 +426,7 @@ uniform-random policy in every bucket:
 - [x] Pure reward model + worked-example verification
 - [x] Tabular Monte-Carlo control vs exact Bellman solution
 - [x] Double DQN with target network (recovers the optimal response policy)
-- [ ] Prioritized Experience Replay
+- [x] Prioritized Experience Replay (sum-tree + IS correction; sharpens Suspicious)
 - [ ] Per-class precision / recall / F1 / FPR on the untouched holdouts
 
 ---
@@ -409,7 +439,7 @@ This project exercises the core **Temporal Difference learning** toolkit:
 |-----------|----------------|
 | **TD(0) Q-learning** | off-policy Bellman update with a bootstrapped target |
 | **Function approximation** | a Double DQN network replaces the tabular $Q$-table |
-| **Experience Replay** | uniform replay now; prioritized mini-batch sampling planned |
+| **Experience Replay** | uniform replay + **prioritized** mini-batch sampling (sum-tree, IS-weighted) |
 | **Target network** | frozen $\theta^-$ decouples the TD target (hard-copied every 1k updates) |
 | **MDP formalisation** | full $(S, A, P, R, \gamma)$ with stochastic transitions |
 | **ε-greedy exploration** | balances exploitation vs. exploration (GLIE in the tabular stage) |

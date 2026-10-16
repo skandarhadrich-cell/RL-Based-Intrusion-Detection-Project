@@ -162,7 +162,8 @@ class DoubleDQNAgent:
             p.requires_grad_(False)
 
         self.optimizer = torch.optim.Adam(self.online.parameters(), lr=lr)
-        self.loss_fn = nn.SmoothL1Loss()
+        # element-wise so importance-sampling weights can be applied (PER).
+        self.loss_fn = nn.SmoothL1Loss(reduction="none")
         self.updates = 0
         self._rng = np.random.default_rng(seed)
 
@@ -191,8 +192,15 @@ class DoubleDQNAgent:
     def sync_target(self) -> None:
         self.target.load_state_dict(self.online.state_dict())
 
-    def update(self, batch: dict[str, np.ndarray]) -> float:
-        """One gradient step on a sampled batch; returns the loss."""
+    def learn(self, batch: dict[str, np.ndarray],
+              weights: np.ndarray | None = None) -> tuple[float, np.ndarray]:
+        """One gradient step; returns ``(loss, td_errors)``.
+
+        ``weights`` are per-sample importance-sampling weights (PER); when given,
+        the element-wise Huber loss is multiplied by them before reduction, which
+        un-biases the prioritised sampling.  ``td_errors`` (``target - q_pred``,
+        detached) let a prioritized buffer refresh its priorities.
+        """
         obs = torch.as_tensor(batch["obs"], device=self.device)
         action = torch.as_tensor(batch["action"], device=self.device).long()
         reward = torch.as_tensor(batch["reward"], device=self.device).float()
@@ -207,7 +215,13 @@ class DoubleDQNAgent:
             )
 
         q_pred = self.online(obs).gather(1, action.unsqueeze(1)).squeeze(1)
-        loss = self.loss_fn(q_pred, target)
+        td = (target - q_pred).detach()
+        per_sample = self.loss_fn(q_pred, target)
+        if weights is not None:
+            w = torch.as_tensor(weights, device=self.device).float().reshape(-1)
+            loss = (per_sample * w).mean()
+        else:
+            loss = per_sample.mean()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -218,7 +232,13 @@ class DoubleDQNAgent:
         self.updates += 1
         if self.updates % self.target_sync == 0:
             self.sync_target()
-        return float(loss.item())
+        return float(loss.item()), td.cpu().numpy()
+
+    def update(self, batch: dict[str, np.ndarray],
+               weights: np.ndarray | None = None) -> float:
+        """One gradient step on a sampled batch; returns the loss (uniform path)."""
+        loss, _ = self.learn(batch, weights)
+        return loss
 
     # ---- persistence ------------------------------------------------------ #
     def save(self, path: str | Path) -> None:
