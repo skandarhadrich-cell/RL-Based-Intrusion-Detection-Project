@@ -5,7 +5,8 @@
   <img src="https://img.shields.io/badge/PyTorch-2.x-EE4C2C?style=for-the-badge&logo=pytorch" />
   <img src="https://img.shields.io/badge/Gymnasium-1.x-green?style=for-the-badge" />
   <img src="https://img.shields.io/badge/Dataset-CSE--CIC--IDS2018%20%2B%20CIC--IDS2017-orange?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/Status-Double%20DQN%20%2B%20PER%20done-brightgreen?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/tests-174%20passed-brightgreen?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/License-MIT-blue?style=for-the-badge" />
 </p>
 
 > An autonomous network intrusion-detection and response agent trained with
@@ -13,12 +14,15 @@
 > sanity check first, then **Double DQN + Prioritized Experience Replay** —
 > inside a custom **Gymnasium** environment. Telemetry comes from
 > **CSE-CIC-IDS2018** and **CIC-IDS2017**; the attack ground-truth label is used
-> **only for the reward and for evaluation**, never as an observation.
+> **only for the reward and for evaluation**, never as an observation. Detection
+> is finally scored **without** the action mask, so the agent's own action *is*
+> the decision.
 
 ---
 
 ## 📑 Table of Contents
 
+- [Results at a Glance](#-results-at-a-glance)
 - [Overview](#-overview)
 - [MDP Formulation](#-mdp-formulation)
 - [State Space](#-state-space-s)
@@ -30,9 +34,33 @@
 - [Installation](#-installation)
 - [Usage](#-usage)
 - [Phase Status & Docs](#-phase-status--docs)
-- [Results So Far](#-results-so-far)
+- [Results](#-results)
 - [Roadmap](#-roadmap)
 - [Course Objectives](#-course-objectives)
+
+---
+
+## ✨ Results at a Glance
+
+A value-based RL agent that learns **when and how to respond** to network
+intrusions from raw flow telemetry — validated against an exact reference at every
+stage, then challenged on data it has never seen.
+
+| Stage | Headline result |
+|-------|-----------------|
+| **Tabular MC control** | Converges to the exact Bellman optimal policy (`8.72 / 23.16 / 14.51`) — the env and reward are sound *before* any neural net. |
+| **Double DQN** | Recovers the full IR playbook (Monitor / Honeypot / Block) and beats a random policy in every bucket. |
+| **+ Prioritized Replay** | Sharpens the hardest bucket (Suspicious 20.17 → 20.65) with the same agent, env and seed. |
+| **Mask-free (Path 2)** | Same optimal policy **without** the action mask — detection read straight off the agent's own actions: 2017 `DDoS` recall **0.36**, `PortScan` **0.41** at a ~**0.10** benign false-alarm rate. |
+| **Coverage ablation** | Adding the missing attack families lifts `PortScan` recall **0.11 → 0.31** (PER), proving the ceiling is **data coverage, not tuning**. |
+
+> **The one-line finding.** The agent reliably detects the attack families it was
+> trained on; once measured honestly (mask removed), its failures are a
+> *data-coverage* limit — demonstrated by adding the missing concepts and watching
+> recall rise.
+
+Every number is backed by a committed report under
+[`data/processed/`](data/processed/) and a phase doc under [`docs/`](docs/).
 
 ---
 
@@ -57,6 +85,9 @@ reference before the next one is added:
    abstraction, checked against the exact Bellman solution.
 5. **Deep RL** — **Double DQN** with a target network and **Prioritized
    Experience Replay**.
+6. **Honest detection** — remove the action mask so the agent's own action *is*
+   the detection decision, then add the missing attack concepts to show the
+   remaining failures are a **data-coverage** limit, not a tuning one.
 
 Everything is organized so a single label→state mapping, feature list, and
 transition/reward model are the only sources of truth.
@@ -231,9 +262,12 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── train_tabular_maskfree.py  # mask-free tabular gate (perfect perception)
 │   ├── train_maskfree.py    # mask-free Double DQN + PER training driver
 │   ├── maskfree_detect.py   # policy-based holdout detection (non-circular)
+│   ├── coverage_split.py    # additive coverage corpus (missing attack concepts)
+│   ├── train_coverage.py    # retrain DQN + PER on the augmented corpus
+│   ├── coverage_eval.py     # baseline-vs-coverage ablation
 │   └── validate_reward.py   # reward verification report + replay check
 │
-├── tests/                   # pytest suite (163 tests)
+├── tests/                   # pytest suite (174 tests)
 │   ├── test_dataset_preprocessing.py
 │   ├── test_ids2017_integration.py
 │   ├── test_environment.py
@@ -242,7 +276,8 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── test_dqn.py
 │   ├── test_per.py
 │   ├── test_holdout_metrics.py
-│   └── test_maskfree.py
+│   ├── test_maskfree.py
+│   └── test_coverage_split.py
 │
 ├── docs/
 │   ├── dataset_preprocessing.md   # acquisition, cleaning, merge, splits
@@ -252,7 +287,8 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── double_dqn.md              # Double DQN agent design + training
 │   ├── prioritized_replay.md      # prioritized replay: sum-tree, IS, results
 │   ├── holdout_evaluation.md      # per-class P/R/F1/FPR on the untouched holdouts
-│   └── maskfree_agent.md          # Path 2: mask removed, retrain, detect from actions
+│   ├── maskfree_agent.md          # Path 2: mask removed, retrain, detect from actions
+│   └── coverage_ablation.md       # add the missing concepts, measure the delta
 │
 ├── data/
 │   ├── raw/                 # downloaded CSVs (git-ignored)
@@ -263,6 +299,7 @@ RL-Based-Intrusion-Detection-Project/
 ├── download_ids2018.sh      # fetch CSE-CIC-IDS2018 CSVs
 ├── download_ids2017.sh      # fetch + unpack CIC-IDS2017 archives
 ├── requirements.txt
+├── LICENSE                  # MIT
 └── README.md
 ```
 
@@ -428,7 +465,7 @@ replace `python` with its interpreter if needed.)*
 
 ---
 
-## 📊 Results So Far
+## 📊 Results
 
 The tabular **first-visit Monte-Carlo control** run (40,000 episodes, α = 0.05)
 converges to the expected optimal policy on a 3-state abstraction, and its
