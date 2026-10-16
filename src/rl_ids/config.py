@@ -355,6 +355,11 @@ VALID_ACTIONS: dict[str, tuple[int, ...]] = {
                     ACTION_INDEX["Isolate"]),
 }
 
+# Mask-free mode (Path 2): every action is offered in every state. The playbook
+# mask above is then ignored by the environment (observations and rewards are
+# unchanged); the agent must infer the hidden bucket to find the optimal policy.
+ALL_ACTION_INDICES: tuple[int, ...] = tuple(range(len(ACTIONS)))
+
 # Operating cost charged per action execution (per single flow step).
 ACTION_COSTS: dict[int, float] = {
     ACTION_INDEX[n]: c for n, c in (
@@ -394,20 +399,37 @@ OBS_MASK_PROB = 0.1         # per-feature probability of "missing telemetry" (->
 #   S - Honeypot : .295 benign resolved (-2) | .510 attack caught (+15, persists)
 #                                                        | .195 escalates (+15)
 #   C - Block    : .503 persists (-2) | .497 resolved (+18, terminal)
+# The first entry per state is the playbook action; the remaining entries exist
+# only for MASK-FREE mode (Path 2), where every action is offered in every state.
+# The playbook rows are untouched, so the masked MDP is byte-identical.
 TRANSITIONS: dict[str, dict[str, dict[str, float]]] = {
     "Normal": {
-        "Monitor": {"Normal": 0.840, "Suspicious": 0.005, "Compromised": 0.155},
+        "Monitor":  {"Normal": 0.840, "Suspicious": 0.005, "Compromised": 0.155},
+        # In a truly-Normal state the attack dynamics are a property of the
+        # state, not of the action; off-playbook actions only differ in reward.
+        "DPI":      {"Normal": 0.840, "Suspicious": 0.005, "Compromised": 0.155},
+        "Throttle": {"Normal": 0.840, "Suspicious": 0.005, "Compromised": 0.155},
+        "Honeypot": {"Normal": 0.840, "Suspicious": 0.005, "Compromised": 0.155},
+        "Block":    {"Normal": 0.840, "Suspicious": 0.005, "Compromised": 0.155},
+        "Isolate":  {"__terminal__": 1.0},
     },
     "Suspicious": {
         "Monitor":  {"Suspicious": 0.70, "Compromised": 0.20, "Normal": 0.10},
         "DPI":      {"Suspicious": 0.50, "Compromised": 0.20, "Normal": 0.30},
         "Throttle": {"Suspicious": 0.55, "Compromised": 0.20, "Normal": 0.25},
         "Honeypot": {"Suspicious": 0.510, "Compromised": 0.195, "Normal": 0.295},
+        # Off-playbook: a hard Block resolves suspicious traffic more often.
+        "Block":    {"Normal": 0.40, "Suspicious": 0.40, "Compromised": 0.20},
+        "Isolate":  {"__terminal__": 1.0},
     },
     "Compromised": {
-        "Monitor": {"Compromised": 0.90, "Normal": 0.10},
-        "Block":   {"Compromised": 0.503, "Normal": 0.497},
-        "Isolate": {"__terminal__": 1.0},
+        "Monitor":  {"Compromised": 0.90, "Normal": 0.10},
+        "Block":    {"Compromised": 0.503, "Normal": 0.497},
+        "Isolate":  {"__terminal__": 1.0},
+        # Off-playbook: softer actions contain a confirmed compromise less often.
+        "DPI":      {"Compromised": 0.85, "Normal": 0.15},
+        "Throttle": {"Compromised": 0.65, "Normal": 0.35},
+        "Honeypot": {"Compromised": 0.60, "Normal": 0.40},
     },
 }
 
@@ -454,6 +476,20 @@ PER_EPS = 1e-5              # priority floor, keeps every transition sampleable
 PER_REPORT_PATH = PROCESSED_DIR / "prioritized_replay_report.md"
 PER_CURVE_PNG = PROCESSED_DIR / "prioritized_replay_learning_curve.png"
 PER_MODEL_PATH = MODELS_DIR / "double_dqn_per.pt"
+
+# --------------------------------------------------------------------------- #
+# Mask-free mode (Path 2) - the agent is offered every action in every state
+# --------------------------------------------------------------------------- #
+MASKFREE_DQN_REPORT_PATH = PROCESSED_DIR / "maskfree_dqn_report.md"
+MASKFREE_DQN_CURVE_PNG = PROCESSED_DIR / "maskfree_dqn_learning_curve.png"
+MASKFREE_DQN_MODEL_PATH = MODELS_DIR / "double_dqn_maskfree.pt"
+MASKFREE_PER_REPORT_PATH = PROCESSED_DIR / "maskfree_per_report.md"
+MASKFREE_PER_CURVE_PNG = PROCESSED_DIR / "maskfree_per_learning_curve.png"
+MASKFREE_PER_MODEL_PATH = MODELS_DIR / "double_dqn_per_maskfree.pt"
+MASKFREE_TABULAR_REPORT_PATH = PROCESSED_DIR / "maskfree_tabular_report.md"
+MASKFREE_TABULAR_CURVE_PNG = PROCESSED_DIR / "maskfree_tabular_learning_curve.png"
+MASKFREE_DETECT_REPORT_PATH = PROCESSED_DIR / "maskfree_holdout_detection_report.md"
+MASKFREE_DETECT_CM_PNG = PROCESSED_DIR / "maskfree_holdout_confusion_matrix.png"
 
 # --------------------------------------------------------------------------- #
 # Holdout per-class detection evaluation (probe on the learned representation)

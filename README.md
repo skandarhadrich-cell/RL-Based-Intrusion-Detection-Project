@@ -228,9 +228,12 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── train_per.py         # PER training driver (report + curve)
 │   ├── metrics.py           # pure per-class precision/recall/F1/FPR functions
 │   ├── holdout_eval.py      # probe-based holdout detection evaluation driver
+│   ├── train_tabular_maskfree.py  # mask-free tabular gate (perfect perception)
+│   ├── train_maskfree.py    # mask-free Double DQN + PER training driver
+│   ├── maskfree_detect.py   # policy-based holdout detection (non-circular)
 │   └── validate_reward.py   # reward verification report + replay check
 │
-├── tests/                   # pytest suite (131 tests)
+├── tests/                   # pytest suite (163 tests)
 │   ├── test_dataset_preprocessing.py
 │   ├── test_ids2017_integration.py
 │   ├── test_environment.py
@@ -238,7 +241,8 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── test_tabular_mc_control.py
 │   ├── test_dqn.py
 │   ├── test_per.py
-│   └── test_holdout_metrics.py
+│   ├── test_holdout_metrics.py
+│   └── test_maskfree.py
 │
 ├── docs/
 │   ├── dataset_preprocessing.md   # acquisition, cleaning, merge, splits
@@ -247,7 +251,8 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── tabular_mc_control.md      # MC control vs exact Bellman solution
 │   ├── double_dqn.md              # Double DQN agent design + training
 │   ├── prioritized_replay.md      # prioritized replay: sum-tree, IS, results
-│   └── holdout_evaluation.md      # per-class P/R/F1/FPR on the untouched holdouts
+│   ├── holdout_evaluation.md      # per-class P/R/F1/FPR on the untouched holdouts
+│   └── maskfree_agent.md          # Path 2: mask removed, retrain, detect from actions
 │
 ├── data/
 │   ├── raw/                 # downloaded CSVs (git-ignored)
@@ -366,7 +371,22 @@ logistic-regression probe is fitted on the frozen 128-d layer of the Q-network
 (train split only) and tested on the holdouts, with the raw-17-feature probe as
 a no-representation baseline.
 
-### 8. Run the test suite
+### 8. Mask-free agent (Path 2): drop the mask and retrain
+
+```bash
+PYTHONPATH=src python -m rl_ids.train_tabular_maskfree   # tabular gate (perfect perception)
+PYTHONPATH=src python -m rl_ids.train_maskfree           # mask-free Double DQN + PER
+PYTHONPATH=src python -m rl_ids.maskfree_detect          # policy-based holdout detection
+```
+
+Removes the playbook action mask — every action is offered in every state — and
+retrains both agents so they must **infer** the hidden severity bucket from
+telemetry. The mask-free MDP has the *same* optimal policy and values as the
+masked one (verified via the exact Bellman solution), so any policy the agent
+finds it found by perceiving the state. With no mask, the agent's own action *is*
+the detection decision, which is what makes the holdout detection non-circular.
+
+### 9. Run the test suite
 
 ```bash
 python -m pytest tests/ -q
@@ -388,6 +408,7 @@ replace `python` with its interpreter if needed.)*
 | Double DQN | ✅ done | [`docs/double_dqn.md`](docs/double_dqn.md) |
 | Prioritized Experience Replay | ✅ done | [`docs/prioritized_replay.md`](docs/prioritized_replay.md) |
 | Holdout detection evaluation | ✅ done | [`docs/holdout_evaluation.md`](docs/holdout_evaluation.md) |
+| Mask-free agent (Path 2) | ✅ done | [`docs/maskfree_agent.md`](docs/maskfree_agent.md) |
 
 ---
 
@@ -464,6 +485,41 @@ so a probe, not the agent's actions, is the only honest detection signal here.
 
 ![Holdout confusion matrices](data/processed/holdout_confusion_matrix.png)
 
+### Mask-free agent (Path 2): detect from the agent's own actions
+
+The probe above works around the mask, but it needs an extra classifier. **Path 2
+removes the mask instead**: every action is offered in every state, both agents
+are retrained, and they must infer the hidden bucket from telemetry. The
+mask-free MDP has the *same* exact Bellman optimum (`8.721 / 23.163 / 14.508`), so
+the target policy is unchanged — only the mask is gone. Both agents recover the
+**full playbook policy** (Monitor / Honeypot / Block):
+
+| Start state | Masked uniform | Mask-free uniform | Masked PER | Mask-free PER |
+|-------------|---------------:|------------------:|-----------:|--------------:|
+| Normal | 8.58 | 6.54 | 8.47 | 5.18 |
+| Suspicious | 20.17 | 20.10 | 20.65 | 20.67 |
+| Compromised | 14.39 | 13.00 | 14.30 | 12.78 |
+
+With no mask the greedy action *is* the detection decision, so it can be scored
+directly on the holdouts — no probe, no circularity:
+
+| Model | Holdout | Accuracy | Macro F1 | Benign FPR |
+|-------|---------|---------:|---------:|-----------:|
+| mask-free uniform | Infiltration (2018) | 0.488 | 0.220 | **0.025** |
+| mask-free PER | Infiltration (2018) | 0.451 | 0.214 | 0.099 |
+| mask-free uniform | PortScan + DDoS (2017) | 0.457 | 0.394 | 0.097 |
+| mask-free PER | PortScan + DDoS (2017) | 0.437 | 0.362 | 0.099 |
+| masked uniform / PER | any | ≈0.00 | ≈0.00 | **1.000** |
+
+The masked agents flag **every** benign flow as an attack (FPR = 1.000) — their
+mask-free argmax collapses, because nothing ever forced their Q-outputs to encode
+the state. The mask-free agents are the only ones that separate benign from
+attack: `DDoS` recall 0.36 and `PortScan` recall 0.41 at a ~0.10 false-alarm rate
+on 2017, while 2018 `Infilteration` (no training counterpart) stays hard — the
+same coverage limit the probe found, now measured end-to-end.
+
+![Mask-free confusion matrices](data/processed/maskfree_holdout_confusion_matrix.png)
+
 ---
 
 ## 🗺️ Roadmap
@@ -475,6 +531,7 @@ so a probe, not the agent's actions, is the only honest detection signal here.
 - [x] Double DQN with target network (recovers the optimal response policy)
 - [x] Prioritized Experience Replay (sum-tree + IS correction; sharpens Suspicious)
 - [x] Per-class precision / recall / F1 / FPR on the untouched holdouts
+- [x] Mask-free agent (Path 2): drop the mask, retrain, detect from actions
 
 ---
 

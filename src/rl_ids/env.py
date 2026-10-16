@@ -88,6 +88,7 @@ class IDSEnv2018(gym.Env):
         parquet_path: str | None = None,
         seed: int | None = None,
         truncate_obs: int | None = None,
+        mask_actions: bool = True,
     ) -> None:
         super().__init__()
         if split not in ("train", "holdout"):
@@ -99,6 +100,10 @@ class IDSEnv2018(gym.Env):
         self.max_steps = int(max_steps)
         self.obs_noise_sigma = float(obs_noise_sigma)
         self.obs_mask_prob = float(obs_mask_prob)
+        # Mask-free mode (Path 2): offer every action in every state. The
+        # playbook mask is still *reported* (all-ones) so downstream code that
+        # threads a mask through is unchanged.
+        self.mask_actions = bool(mask_actions)
 
         # Real-flow pools per hidden state (feature matrix + matching labels).
         self.pools, self.pool_labels = self._build_pools(max_rows_per_state)
@@ -147,6 +152,8 @@ class IDSEnv2018(gym.Env):
         return row.astype(np.float32)
 
     def _action_mask(self, state: str | None = None) -> np.ndarray:
+        if not self.mask_actions:
+            return np.ones(len(C.ACTIONS), dtype=bool)
         st = state if state is not None else self._state
         m = np.zeros(len(C.ACTIONS), dtype=bool)
         for i in C.VALID_ACTIONS[st]:
@@ -199,15 +206,20 @@ class IDSEnv2018(gym.Env):
         latency_pen = latency_penalty(self._latency_run)
 
         term_reason = None
-        if C.ACTION_INDEX[name] not in C.VALID_ACTIONS[self._state]:
-            # Guard rail: masked actions are heavily penalized, no state change.
+        if self.mask_actions and C.ACTION_INDEX[name] not in C.VALID_ACTIONS[self._state]:
+            # Guard rail (masked mode only): illegal actions are heavily
+            # penalized and do not change state. Mask-free mode never hits this.
             reward = float(C.INVALID_ACTION_PENALTY - latency_pen)
             next_state = self._state
             terminated = self._steps >= self.max_steps
             term_reason = "timeout" if terminated else "invalid_action"
         else:
             next_state = self._sample_next_state(name)
-            reward = float(reward_function(self._state, name, next_state) - latency_pen)
+            reward = float(
+                reward_function(self._state, name, next_state,
+                                enforce_legality=self.mask_actions)
+                - latency_pen
+            )
 
             resolved = next_state == "Normal" and self._state != "Normal"
             isolated = next_state == C.TERMINAL_MARKER

@@ -171,7 +171,9 @@ class DoubleDQNAgent:
     @torch.no_grad()
     def q_values(self, obs) -> np.ndarray:
         """Q-values for a single observation (or batch of them)."""
-        x = torch.as_tensor(np.asarray(obs, dtype=np.float32), device=self.device)
+        # np.array() copies, so a read-only view (e.g. straight from pandas)
+        # cannot trigger torch's non-writable-tensor warning.
+        x = torch.as_tensor(np.array(obs, dtype=np.float32), device=self.device)
         if x.ndim == 1:
             x = x.unsqueeze(0)
         return self.online(x).cpu().numpy()

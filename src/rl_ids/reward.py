@@ -64,6 +64,42 @@ _NET: dict[tuple[str, str, str], float] = {
     # Isolate: TP but full quarantine cost.
     ("Compromised", "Isolate", C.TERMINAL_MARKER): C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["Isolate"]],   # 3.0
     ("Compromised", "Isolate", None):            C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["Isolate"]],
+    # --------------------------------------------------------------------- #
+    # Mask-free (Path 2) entries: every playbook-illegal action is now
+    # reachable.  Semantics: inspecting benign traffic is a wasted-cost no-op
+    # (NONE), mitigation on a benign state is a false positive, and a soft action
+    # on a confirmed compromise is a false negative.  Design goal: the playbook
+    # action stays the strict argmax in every state (verified by the mask-free
+    # Bellman solution), so the task is unchanged - only the mask is gone.
+    # --------------------------------------------------------------------- #
+    # --- Normal (true state benign) --------------------------------------- #
+    ("Normal", "DPI", "Normal"):        -C.ACTION_COSTS[C.ACTION_INDEX["DPI"]],              # -1.0  (NONE)
+    ("Normal", "DPI", "Suspicious"):    -C.ACTION_COSTS[C.ACTION_INDEX["DPI"]],
+    ("Normal", "DPI", "Compromised"):   -C.ACTION_COSTS[C.ACTION_INDEX["DPI"]],
+    ("Normal", "Throttle", "Normal"):   -C.ACTION_COSTS[C.ACTION_INDEX["Throttle"]],         # -1.5
+    ("Normal", "Throttle", "Suspicious"): -C.ACTION_COSTS[C.ACTION_INDEX["Throttle"]],
+    ("Normal", "Throttle", "Compromised"): -C.ACTION_COSTS[C.ACTION_INDEX["Throttle"]],
+    ("Normal", "Honeypot", "Normal"):   C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Honeypot"]],   # -15.0
+    ("Normal", "Honeypot", "Suspicious"): C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Honeypot"]],
+    ("Normal", "Honeypot", "Compromised"): C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Honeypot"]],
+    ("Normal", "Block", "Normal"):      C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Block"]],      # -14.0
+    ("Normal", "Block", "Suspicious"):  C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Block"]],
+    ("Normal", "Block", "Compromised"): C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Block"]],
+    ("Normal", "Isolate", C.TERMINAL_MARKER): C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Isolate"]],  # -27.0
+    ("Normal", "Isolate", None):        C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Isolate"]],
+    # --- Suspicious: over-reaction on a merely-suspicious flow ------------ #
+    ("Suspicious", "Block", "Normal"):      C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Block"]],   # -14.0
+    ("Suspicious", "Block", "Suspicious"):  C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["Block"]],   # 16.0
+    ("Suspicious", "Block", "Compromised"): C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["Block"]],   # 16.0
+    ("Suspicious", "Isolate", C.TERMINAL_MARKER): C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Isolate"]],  # -27.0
+    ("Suspicious", "Isolate", None):        C.DETECTION_REWARDS["FP"] - C.ACTION_COSTS[C.ACTION_INDEX["Isolate"]],
+    # --- Compromised: too-soft actions let a confirmed compromise persist -- #
+    ("Compromised", "DPI", "Compromised"):      C.DETECTION_REWARDS["FN"] - C.ACTION_COSTS[C.ACTION_INDEX["DPI"]],      # -41.0
+    ("Compromised", "DPI", "Normal"):           C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["DPI"]],      # 17.0
+    ("Compromised", "Throttle", "Compromised"): C.DETECTION_REWARDS["FN"] - C.ACTION_COSTS[C.ACTION_INDEX["Throttle"]], # -41.5
+    ("Compromised", "Throttle", "Normal"):      C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["Throttle"]], # 16.5
+    ("Compromised", "Honeypot", "Compromised"): C.DETECTION_REWARDS["FN"] - C.ACTION_COSTS[C.ACTION_INDEX["Honeypot"]], # -43.0
+    ("Compromised", "Honeypot", "Normal"):      C.DETECTION_REWARDS["TP"] - C.ACTION_COSTS[C.ACTION_INDEX["Honeypot"]], # 15.0
 }
 
 
@@ -98,16 +134,19 @@ def classification(state: str, action: int | str, next_state: str | None) -> str
     return "NONE"
 
 
-def reward_function(state: str, action: int | str, next_state: str | None) -> float:
+def reward_function(state: str, action: int | str, next_state: str | None,
+                    enforce_legality: bool = True) -> float:
     """Net immediate reward for (state, action) leading to next_state.
 
     ``next_state`` is the MDP state the transition landed on; for terminal
-    actions (Isolate) pass ``None`` or C.TERMINAL_MARKER.  Masked (illegal)
-    actions return C.INVALID_ACTION_PENALTY - the environment never offers
-    them, so this is just a guard rail.
+    actions (Isolate) pass ``None`` or C.TERMINAL_MARKER.  With
+    ``enforce_legality=True`` (default) masked (illegal) actions return
+    C.INVALID_ACTION_PENALTY - the environment never offers them, so this is just
+    a guard rail.  Mask-free mode (Path 2) passes ``enforce_legality=False`` so
+    the reward is total over all 18 (state, action) pairs.
     """
     name = _normalize_action(action)
-    if C.ACTION_INDEX[name] not in C.VALID_ACTIONS[state]:
+    if enforce_legality and C.ACTION_INDEX[name] not in C.VALID_ACTIONS[state]:
         return C.INVALID_ACTION_PENALTY
     key = (state, name, next_state)
     if key not in _NET:
@@ -162,15 +201,17 @@ def latency_penalty(queue_length: int, alpha: float | None = None) -> float:
 
 
 def step_breakdown(
-    state: str, action: int | str, next_state: str | None
+    state: str, action: int | str, next_state: str | None,
+    enforce_legality: bool = True,
 ) -> dict[str, float | str]:
     """Decompose one step into its reward components (latency excluded).
 
     Returns {event, detection (R_detection), cost (C_action), net}.  ``net`` is
     the exact value reward_function() returns, i.e. R(s,a) before P_latency.
+    Pass ``enforce_legality=False`` to decompose a mask-free (Path 2) step.
     """
     name = _normalize_action(action)
-    net = reward_function(state, name, next_state)
+    net = reward_function(state, name, next_state, enforce_legality=enforce_legality)
     return {
         "event": classification(state, name, next_state),
         "detection": detection_payoff(classification(state, name, next_state)),
@@ -184,20 +225,25 @@ def step_reward(
     action: int | str,
     next_state: str | None,
     latency_run: int = 0,
+    enforce_legality: bool = True,
 ) -> float:
     """Full per-step reward R(s,a) = net(state, action, next) - P_latency(run).
 
     ``latency_run`` must mirror the environment's consecutive DPI/Throttle
     counter *after* this action was executed (this step's queue length).
     """
-    return reward_function(state, action, next_state) - latency_penalty(latency_run)
+    return (reward_function(state, action, next_state,
+                            enforce_legality=enforce_legality)
+            - latency_penalty(latency_run))
 
 
 def returns_from_trace(
     trace: list[tuple[str, str, str | None]],
     gamma: float = C.GAMMA,
+    enforce_legality: bool = True,
 ) -> list[float]:
     """Discounted returns G_t for an offline (state, action, next_state) trace."""
     return discounted_returns(
-        [reward_function(s, a, sp) for s, a, sp in trace], gamma
+        [reward_function(s, a, sp, enforce_legality=enforce_legality)
+         for s, a, sp in trace], gamma
     )

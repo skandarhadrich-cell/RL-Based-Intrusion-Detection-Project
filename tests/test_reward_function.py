@@ -157,7 +157,8 @@ def test_step_breakdown_decomposes_net():
     separate): the terminal Block-resolve (+18) and Monitor steps."""
     from rl_ids.reward import _NET
     for (st, a, sp), net in _NET.items():
-        bd = step_breakdown(st, a, sp)
+        # The _NET table is the mask-free (total) reward; decompose it directly.
+        bd = step_breakdown(st, a, sp, enforce_legality=False)
         assert bd["net"] == net
         if (st, a) in {("Compromised", "Block")} and sp == "Normal":
             assert net == 18.0                      # slide convention: cost folded in

@@ -30,6 +30,14 @@ data/processed/day_*.parquet
 !data/processed/prioritized_replay_report.md
 !data/processed/holdout_classification_report.md
 !data/processed/holdout_confusion_matrix.png
+!data/processed/maskfree_dqn_report.md
+!data/processed/maskfree_per_report.md
+!data/processed/maskfree_tabular_report.md
+!data/processed/maskfree_holdout_detection_report.md
+!data/processed/maskfree_dqn_learning_curve.png
+!data/processed/maskfree_per_learning_curve.png
+!data/processed/maskfree_tabular_learning_curve.png
+!data/processed/maskfree_holdout_confusion_matrix.png
 !data/processed/scaler.json
 # per-source raw-data inspection evidence
 !data/processed/source_inspection_ids2017.md

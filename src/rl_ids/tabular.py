@@ -24,7 +24,13 @@ SIDX: dict[str, int] = {s: i for i, s in enumerate(C.STATES)}
 NACT: int = len(C.ACTIONS)
 
 
-def legal_mask(state: str) -> np.ndarray:
+def legal_mask(state: str, all_actions: bool = False) -> np.ndarray:
+    """Boolean mask of selectable actions in `state`.
+
+    ``all_actions=True`` is the mask-free (Path 2) world: every action is legal.
+    """
+    if all_actions:
+        return np.ones(NACT, dtype=bool)
     mask = np.zeros(NACT, dtype=bool)
     mask[list(C.VALID_ACTIONS[state])] = True
     return mask
@@ -41,15 +47,16 @@ def epsilon_glie(episode: int, divisor: int = 1000) -> float:
     return 1.0 / (1.0 + episode / float(divisor))
 
 
-def egreedy_action(Q: np.ndarray, state: str, eps: float, rng) -> int:
-    mask = legal_mask(state)
+def egreedy_action(Q: np.ndarray, state: str, eps: float, rng,
+                   all_actions: bool = False) -> int:
+    mask = legal_mask(state, all_actions)
     if rng.random() < eps:
         return int(rng.choice(np.flatnonzero(mask)))
-    return int(greedy_actions(Q, state)[0])
+    return int(greedy_actions(Q, state, all_actions)[0])
 
 
-def greedy_actions(Q: np.ndarray, state: str) -> list[int]:
-    mask = legal_mask(state)
+def greedy_actions(Q: np.ndarray, state: str, all_actions: bool = False) -> list[int]:
+    mask = legal_mask(state, all_actions)
     q = Q[SIDX[state]].copy()
     q[~mask] = -np.inf
     best = float(np.max(q))
@@ -93,6 +100,7 @@ def mc_control(
     starts: list[str] | None = None,
     track_every: int = 1000,
     q0: float = 0.0,
+    all_actions: bool = False,
 ):
     """First-visit constant-α GLIE MC control with exploring starts.
 
@@ -108,7 +116,10 @@ def mc_control(
     Q = np.zeros((len(C.STATES), NACT))
     if q0 > 0.0:
         for i, s in enumerate(C.STATES):
-            Q[i, C.VALID_ACTIONS[s]] = q0
+            if all_actions:
+                Q[i, :] = q0
+            else:
+                Q[i, C.VALID_ACTIONS[s]] = q0
     track = {"episode": [], "Q": [], "eps": []}
 
     for ep in range(episodes):
@@ -123,7 +134,7 @@ def mc_control(
         done = False
         s = info["mdp_state"]
         while not done:
-            a = egreedy_action(Q, s, eps, rng)
+            a = egreedy_action(Q, s, eps, rng, all_actions)
             _, r, term, trunc, info = env.step(a)
             trace.append((s, a, float(r)))
             s = info["mdp_state"]
@@ -142,31 +153,38 @@ def mc_control(
 
 
 def bellman_solution(gamma: float = C.GAMMA, tol: float = 1e-9,
-                     max_iter: int = 50_000) -> np.ndarray:
+                     max_iter: int = 50_000, all_actions: bool = False) -> np.ndarray:
     """Exact q* by value iteration over the configured transition kernel.
 
     Termination matches the env: a step is terminal when it lands on Normal
     from a non-Normal state ("resolved"), or on the Isolate marker.
+
+    ``all_actions=True`` solves the mask-free (Path 2) MDP: every action is
+    available in every state and the reward is total over the 3x6 action table.
     """
     Q = np.zeros((len(C.STATES), NACT))
     for _ in range(max_iter):
         V = np.array([
-            float(np.max(Q[i, legal_mask(s)])) for i, s in enumerate(C.STATES)
+            float(np.max(Q[i, legal_mask(s, all_actions)]))
+            for i, s in enumerate(C.STATES)
         ])
         delta = 0.0
         for i, s in enumerate(C.STATES):
             for a in range(NACT):
-                if a not in C.VALID_ACTIONS[s]:
+                if not all_actions and a not in C.VALID_ACTIONS[s]:
                     continue
                 q = 0.0
                 for nxt, p in C.TRANSITIONS[s][C.ACTIONS[a]].items():
                     if nxt == C.TERMINAL_MARKER:
-                        q += p * reward_function(s, a, None)
+                        q += p * reward_function(s, a, None,
+                                                 enforce_legality=not all_actions)
                     else:
                         j = SIDX[nxt]
                         # resolved transition ends the episode (no V(Normal))
                         cont = 0.0 if (nxt == "Normal" and s != "Normal") else V[j]
-                        q += p * (reward_function(s, a, nxt) + gamma * cont)
+                        q += p * (reward_function(s, a, nxt,
+                                                  enforce_legality=not all_actions)
+                                  + gamma * cont)
                 delta = max(delta, abs(Q[i, a] - q))
                 Q[i, a] = q
         if delta < tol:
@@ -181,6 +199,7 @@ def evaluate_greedy(
     episodes: int = 2000,
     seed: int | None = None,
     gamma: float = C.GAMMA,
+    all_actions: bool = False,
 ) -> tuple[float, float]:
     """Mean +/- std discounted return of the greedy (eps=0) policy from `start`."""
     rng = np.random.default_rng(seed)
@@ -189,7 +208,7 @@ def evaluate_greedy(
         _, info = env.reset(seed=(seed or 0) + ep, options={"state": start})
         G, disc, done = 0.0, 1.0, False
         while not done:
-            a = egreedy_action(Q, info["mdp_state"], 0.0, rng)
+            a = egreedy_action(Q, info["mdp_state"], 0.0, rng, all_actions)
             _, r, term, trunc, info = env.step(a)
             G += disc * float(r)
             disc *= gamma
@@ -198,5 +217,6 @@ def evaluate_greedy(
     return float(returns.mean()), float(returns.std())
 
 
-def greedy_policy_table(Q: np.ndarray) -> dict[str, list[str]]:
-    return {s: [C.ACTIONS[a] for a in greedy_actions(Q, s)] for s in C.STATES}
+def greedy_policy_table(Q: np.ndarray, all_actions: bool = False) -> dict[str, list[str]]:
+    return {s: [C.ACTIONS[a] for a in greedy_actions(Q, s, all_actions)]
+            for s in C.STATES}
