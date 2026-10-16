@@ -386,7 +386,22 @@ masked one (verified via the exact Bellman solution), so any policy the agent
 finds it found by perceiving the state. With no mask, the agent's own action *is*
 the detection decision, which is what makes the holdout detection non-circular.
 
-### 9. Run the test suite
+### 9. Coverage ablation: add the missing attack concepts
+
+```bash
+PYTHONPATH=src python -m rl_ids.coverage_split    # build the additive coverage corpus
+PYTHONPATH=src python -m rl_ids.train_coverage     # retrain DQN + PER on it
+PYTHONPATH=src python -m rl_ids.coverage_eval      # baseline-vs-coverage ablation
+```
+
+Carves the missing `PortScan` (2017) and `Infiltration` (2018) rows out of the
+held-out days, splits each so an unseen remainder stays for testing (80/20 time
+cut for PortScan, day-vs-day for Infiltration), retrains both agents on the
+augmented corpus with **everything else held fixed**, and scores baseline vs
+coverage on identical unseen test sets. Purely additive — the original
+`train.parquet`, the holdouts and their reports are untouched.
+
+### 10. Run the test suite
 
 ```bash
 python -m pytest tests/ -q
@@ -409,6 +424,7 @@ replace `python` with its interpreter if needed.)*
 | Prioritized Experience Replay | ✅ done | [`docs/prioritized_replay.md`](docs/prioritized_replay.md) |
 | Holdout detection evaluation | ✅ done | [`docs/holdout_evaluation.md`](docs/holdout_evaluation.md) |
 | Mask-free agent (Path 2) | ✅ done | [`docs/maskfree_agent.md`](docs/maskfree_agent.md) |
+| Coverage ablation (add missing concepts) | ✅ done | [`docs/coverage_ablation.md`](docs/coverage_ablation.md) |
 
 ---
 
@@ -520,6 +536,39 @@ same coverage limit the probe found, now measured end-to-end.
 
 ![Mask-free confusion matrices](data/processed/maskfree_holdout_confusion_matrix.png)
 
+### Coverage ablation: prove the failure is a data-coverage limit
+
+The probe and the policy detector agree that the missed families are exactly the
+ones with **no training representation** (`PortScan`: 0 rows; `Infilteration`: 36
+rows vs 137,720 in the holdout). The coverage ablation adds them — carved from the
+held-out days, split so an unseen remainder stays for testing — and retrains both
+agents with **only the data changed** (same net, seed, episodes, pool cap). Each
+concept is added at its natural proportion (≈2% of its bucket's pool), so this
+tests whether coverage *alone* is sufficient:
+
+| Test set | Attack label | Architecture | Baseline recall | Coverage recall | Δ recall | Baseline FPR | Coverage FPR |
+|---|---|---|---:|---:|---:|---:|---:|
+| PortScan (2017) | `PortScan` | DQN | 0.226 | **0.564** | +0.338 | 0.068 | 0.227 |
+| PortScan (2017) | `PortScan` | PER | 0.108 | **0.312** | +0.204 | 0.086 | **0.072** |
+| Infiltration (2018) | `Infilteration` | DQN | 0.017 | 0.080 | +0.062 | 0.025 | 0.072 |
+| Infiltration (2018) | `Infilteration` | PER | 0.089 | 0.091 | +0.001 | 0.107 | 0.079 |
+
+Two different stories fall out of the same experiment:
+
+- **PortScan — a truly missing concept — is the fix.** Recall jumps in both
+  architectures on a family with **zero** prior training rows. PER is the clean
+  win: recall **0.108 → 0.312** at a *flat* false-alarm rate (0.086 → 0.072).
+  (The DQN's larger jump costs a false-alarm rise, 0.068 → 0.227.)
+- **Infiltration — added but rare — barely moves.** DQN 0.017 → 0.080, PER flat.
+  At ≈2.7% of the Compromised pool the concept is too diluted to dominate the
+  DDoS/DoS mass, so the binding constraint **shifts from coverage to
+  representation** (class-balanced pools or a larger cap would be the next lever).
+
+The original mask-free numbers remain the honest **out-of-distribution** baseline;
+these are the **in-coverage** counterpart.
+
+![Coverage ablation confusion matrices](data/processed/coverage_ablation_confusion.png)
+
 ---
 
 ## 🗺️ Roadmap
@@ -532,6 +581,7 @@ same coverage limit the probe found, now measured end-to-end.
 - [x] Prioritized Experience Replay (sum-tree + IS correction; sharpens Suspicious)
 - [x] Per-class precision / recall / F1 / FPR on the untouched holdouts
 - [x] Mask-free agent (Path 2): drop the mask, retrain, detect from actions
+- [x] Coverage ablation: add the missing PortScan/Infiltration concepts and measure the delta
 
 ---
 

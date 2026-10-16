@@ -61,18 +61,27 @@ MASKED_PER_GREEDY = {"Normal": 8.471, "Suspicious": 20.651, "Compromised": 14.29
 # --------------------------------------------------------------------------- #
 # training
 # --------------------------------------------------------------------------- #
-def train_agent(kind: str, episodes: int = TRAIN_EPISODES, seed: int = SEED) -> dict:
+def train_agent(kind: str, episodes: int = TRAIN_EPISODES, seed: int = SEED,
+                parquet_path=None, max_rows_per_state: int | None = None) -> dict:
     """Train one mask-free agent; ``kind`` is ``"uniform"`` or ``"per"``.
 
     Returns a dict with the environment, trained agent, training history, step
     count and (PER only) the final beta.
+
+    ``parquet_path`` / ``max_rows_per_state`` default to the mask-free phase's
+    train split and pool cap; the coverage ablation overrides them to train on
+    the augmented corpus while keeping everything else identical.
     """
     if kind not in ("uniform", "per"):
         raise ValueError(f"kind must be 'uniform' or 'per', got {kind!r}")
     use_per = kind == "per"
 
-    env = IDSEnv2018(split="train", max_rows_per_state=MAX_ROWS_PER_STATE,
-                     seed=seed, mask_actions=False)
+    env = IDSEnv2018(
+        split="train",
+        max_rows_per_state=(MAX_ROWS_PER_STATE if max_rows_per_state is None
+                            else max_rows_per_state),
+        seed=seed, mask_actions=False, parquet_path=parquet_path,
+    )
     agent = DoubleDQNAgent(seed=seed)
     buffer = PrioritizedReplayBuffer(seed=seed) if use_per else ReplayBuffer(seed=seed)
     rng = np.random.default_rng(seed)

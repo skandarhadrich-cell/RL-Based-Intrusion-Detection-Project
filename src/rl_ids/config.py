@@ -492,6 +492,43 @@ MASKFREE_DETECT_REPORT_PATH = PROCESSED_DIR / "maskfree_holdout_detection_report
 MASKFREE_DETECT_CM_PNG = PROCESSED_DIR / "maskfree_holdout_confusion_matrix.png"
 
 # --------------------------------------------------------------------------- #
+# Coverage ablation - add the missing Suspicious (PortScan) and
+# Compromised (Infiltration) concepts to training and measure the delta.
+#
+# Additive: the original train/holdout parquets are never modified. The coverage
+# corpus is carved from the *currently held-out* days (which the baseline model
+# never saw), split so a fair, unseen remainder stays for testing:
+#   * PortScan day  -> 80/20 time cut (the attack rows are clustered at the end,
+#                      so only a late cut keeps scans on both sides);
+#   * Infiltration  -> day vs day (no within-day leakage).
+# --------------------------------------------------------------------------- #
+COVERAGE_TRAIN_FRAC = 0.80                 # later rows -> test (Suspicious only)
+COVERAGE_DQN_REPORT_PATH = PROCESSED_DIR / "coverage_dqn_report.md"
+COVERAGE_DQN_CURVE_PNG = PROCESSED_DIR / "coverage_dqn_learning_curve.png"
+COVERAGE_DQN_MODEL_PATH = MODELS_DIR / "double_dqn_coverage.pt"
+COVERAGE_PER_REPORT_PATH = PROCESSED_DIR / "coverage_per_report.md"
+COVERAGE_PER_CURVE_PNG = PROCESSED_DIR / "coverage_per_learning_curve.png"
+COVERAGE_PER_MODEL_PATH = MODELS_DIR / "double_dqn_per_coverage.pt"
+COVERAGE_SPLIT_REPORT_PATH = PROCESSED_DIR / "coverage_split_report.md"
+COVERAGE_ABLATION_REPORT_PATH = PROCESSED_DIR / "coverage_ablation_report.md"
+COVERAGE_ABLATION_CM_PNG = PROCESSED_DIR / "coverage_ablation_confusion.png"
+
+# Day-level parquets the coverage corpus is built from (see preprocess.py).
+COVERAGE_DAY_PORTSCAN = PROCESSED_DIR / "day_ids2017_Friday-WorkingHours-Afternoon-PortScan.parquet"
+COVERAGE_DAY_INFILTRATION_TRAIN = PROCESSED_DIR / "day_ids2018_Wednesday-28-02-2018.parquet"
+COVERAGE_DAY_INFILTRATION_TEST = PROCESSED_DIR / "day_ids2018_Thursday-01-03-2018.parquet"
+
+# Generated (git-ignored) coverage parquet artifacts.
+COVERAGE_TRAIN_PARQUET = PROCESSED_DIR / "coverage_train.parquet"
+COVERAGE_COMBINED_PARQUET = PROCESSED_DIR / "coverage_train_combined.parquet"
+COVERAGE_TEST_PORTSCAN_PARQUET = PROCESSED_DIR / "coverage_test_portscan.parquet"
+COVERAGE_TEST_INFILTRATION_PARQUET = PROCESSED_DIR / "coverage_test_infiltration.parquet"
+
+# Minimum representation required in the training pools for the ablated concepts.
+COVERAGE_MIN_PORTSCAN_IN_POOL = 1_000
+COVERAGE_MIN_INFILTRATION_IN_POOL = 2_000
+
+# --------------------------------------------------------------------------- #
 # Holdout per-class detection evaluation (probe on the learned representation)
 # --------------------------------------------------------------------------- #
 HOLDOUT_EVAL_REPORT_PATH = PROCESSED_DIR / "holdout_classification_report.md"
