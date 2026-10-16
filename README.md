@@ -192,7 +192,7 @@ datasets, merged into **one 17-feature schema** (identical meaning and units).
 | Dataset | Source | Role | Merged train rows |
 |---------|--------|------|------------------:|
 | **CSE-CIC-IDS2018** | AWS S3 CICFlowMeter export (10 CSVs, ~6.9 GB) | primary training source | 14,650,066 |
-| **CIC-IDS2017** | `GeneratedLabelledFlows` / *TrafficLabelling* archive | second training source (data-source experiment) | 2,098,059 |
+| **CIC-IDS2017** | `GeneratedLabelledFlows` / *TrafficLabelling* archive | additional training data | 2,098,059 |
 | **Merged train** | — | used to fit the scaler and (later) the agent | **16,748,125** |
 
 **Eval-only holdouts** (never trained on, never scaler-fit):
@@ -201,10 +201,6 @@ datasets, merged into **one 17-feature schema** (identical meaning and units).
 |-------|-----:|------|
 | `holdout_infiltration` (2018) | 701,039 | Wed-28-02, Thu-01-03 (Infiltration) |
 | `holdout_ids2017_portscan_ddos` (2017) | 346,574 | Fri Afternoon PortScan + DDoS |
-
-The pre-merge **2018-only** artifacts (`train_ids2018_only.parquet`,
-`scaler_ids2018_baseline.json`) are archived so the trained-on-2018-only model
-can be A/B-compared against the merged-data model on identical holdouts.
 
 Full methodology, feature-parity checks and caveats:
 [`docs/dataset_preprocessing.md`](docs/dataset_preprocessing.md) and the
@@ -313,8 +309,7 @@ PYTHONPATH=src python -m rl_ids.preprocess
 ```
 
 This writes `data/processed/{train,holdout_infiltration,holdout_ids2017_portscan_ddos}.parquet`,
-`scaler.json`, the archived 2018-only baseline, and regenerates
-`data/processed/dataset_preprocessing_report.md`.
+`scaler.json`, and regenerates `data/processed/dataset_preprocessing_report.md`.
 
 ### 3. Verify the reward model
 
@@ -359,7 +354,6 @@ replace `python` with its interpreter if needed.)*
 | Tabular MC sanity check | ✅ done | [`docs/tabular_mc_control.md`](docs/tabular_mc_control.md) |
 | Double DQN | 🔨 implemented (run pending RAM) | [`docs/double_dqn.md`](docs/double_dqn.md) |
 | Prioritized Experience Replay | ⏳ planned | — |
-| 2018-only vs merged-data A/B | ⏳ planned | — |
 
 ---
 
@@ -392,7 +386,6 @@ the underlying MDP.
 - [~] Double DQN with target network (implemented; training run pending RAM)
 - [ ] Prioritized Experience Replay
 - [ ] Per-class precision / recall / F1 / FPR on the untouched holdouts
-- [ ] A/B comparison: 2018-only model vs merged-data model
 
 ---
 

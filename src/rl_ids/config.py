@@ -24,12 +24,8 @@ SCALER_JSON = PROCESSED_DIR / "scaler.json"
 # data/processed/ so there is a single, always-current copy.
 REPORT_PATH = PROCESSED_DIR / "dataset_preprocessing_report.md"
 
-# CIC-IDS2017 integration: the IDS2017 eval-only split gets its own file, and the
-# pre-integration IDS2018-only artifacts are archived so the A/B can still be run
-# against the original model/scaler.
+# CIC-IDS2017 integration: the IDS2017 eval-only split gets its own file.
 HOLDOUT_IDS2017_PARQUET = PROCESSED_DIR / "holdout_ids2017_portscan_ddos.parquet"
-TRAIN_IDS2018_ONLY_PARQUET = PROCESSED_DIR / "train_ids2018_only.parquet"
-SCALER_IDS2018_BASELINE_JSON = PROCESSED_DIR / "scaler_ids2018_baseline.json"
 
 # --------------------------------------------------------------------------- #
 # Dataset (CSE-CIC-IDS2018 processed CICFlowMeter exports, S3 bucket)

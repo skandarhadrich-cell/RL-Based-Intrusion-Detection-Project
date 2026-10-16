@@ -11,7 +11,7 @@ Writes:
 
 Run:  PYTHONPATH=src python -m rl_ids.train_dqn
 
-Prioritized experience replay and the 2018-only vs merged-data A/B come next.
+Prioritized experience replay comes next.
 NOTE: the online run loads real-flow observation pools into memory, so raise the
 VM RAM (or lower ``MAX_ROWS_PER_STATE``) before running.
 """
@@ -228,13 +228,12 @@ def main() -> None:
     if all(policy_match.values()):
         add("The Double DQN agent recovers the **expected optimal policy** in "
             "every bucket and beats the random baseline, learning from the "
-            "partially-observable telemetry. Ready for prioritized replay and "
-            "the holdout A/B.\n")
+            "partially-observable telemetry. Ready for prioritized replay.\n")
     else:
         missed = [s for s in C.STATES if not policy_match[s]]
         add(f"The agent beats the random baseline but has **not** recovered the "
             f"expected action in: {', '.join(missed)}. Inspect the learning "
-            f"curve / raise episodes before the A/B comparison.\n")
+            f"curve / raise episodes.\n")
 
     add("## 6. Files\n")
     add("| File | Purpose |")

@@ -28,8 +28,6 @@ data/processed/day_*.parquet
 !data/processed/tabular_mc_control_report.md
 !data/processed/double_dqn_report.md
 !data/processed/scaler.json
-# archive of the pre-merge IDS2018-only scaler (A/B baseline)
-!data/processed/scaler_ids2018_baseline.json
 # per-source raw-data inspection evidence
 !data/processed/source_inspection_ids2017.md
 !data/processed/source_inspection_ids2017_trafficlabelling.md

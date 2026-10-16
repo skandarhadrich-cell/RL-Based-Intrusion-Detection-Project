@@ -4,11 +4,9 @@
 
 **Status: DONE** — all 10 checkpoint tests pass on the full 10-day dataset.
 
-> **Extension (this revision):** CIC-IDS2017 is integrated as a **second training
-> source** (controlled data-source experiment). See
+> **Extension (this revision):** CIC-IDS2017 is integrated as **additional
+> training data** through the same code path. See
 > [CIC-IDS2017 integration](#cic-ids2017-integration).
-> The 2018-only pipeline above is preserved byte-for-byte as the A/B baseline
-> (`train_ids2018_only.parquet`, `scaler_ids2018_baseline.json`).
 
 ---
 
@@ -113,9 +111,9 @@ and SQLi rows are few (611/230/87) but present.
 
 ## CIC-IDS2017 integration
 
-**Goal:** add CIC-IDS2017 as a *second training source* without changing the
-17-feature observation schema, then A/B the original 2018-only model
-against the merged-data model on identical, untouched eval sets.
+**Goal:** add CIC-IDS2017 as **additional training data** without changing the
+17-feature observation schema, so the merged train set carries more attack
+diversity than 2018 alone.
 
 ### 1. Why the `TrafficLabelling` archive (not `MachineLearningCVE`)
 
@@ -172,8 +170,7 @@ rate recomputation are unchanged.
 
 > Note: the drop applies to **every** file, holdout files included, so the 2018
 > Infiltration holdout shrank 935,083 → **701,039** rows (same two days, never
-> trained on, never scaler-fit). Both A/B arms are evaluated on this *same*
-> holdout, so the A/B remains fair.
+> trained on, never scaler-fit).
 
 ### 5. Splits (eval-only, never trained on, never scaler-fit)
 
@@ -216,10 +213,8 @@ reward/eval-only and excluded from `OBS_FEATURES`.
 
 ### 8. Scalers
 
-- `scaler.json` — refit on the **merged train only** (both sources; all holdout days
+- `scaler.json` — fit on the **merged train only** (both sources; all holdout days
   excluded); applied to train and both holdouts.
-- `scaler_ids2018_baseline.json` — archived copy of the original 2018-only scaler,
-  used by the baseline arm.
 
 ### 9. Tests
 
@@ -229,7 +224,7 @@ reward/eval-only and excluded from `OBS_FEATURES`.
   invariance, derived-vs-zero-filled `Active Conn Cnt`, canonical-column coverage,
   shipped-rate parity, and the full 2017 label→state policy.
 
-Full suite: **88 passed**.
+Preprocessing suites: **all passing** (see the repo-wide count in the README).
 
 ### How to rebuild
 

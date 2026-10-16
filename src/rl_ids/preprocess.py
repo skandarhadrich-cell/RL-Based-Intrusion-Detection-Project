@@ -21,15 +21,11 @@ Finally: split off each source's held-out day(s) (IDS2018 Infiltration days;
 IDS2017 PortScan + DDoS capture files), fit ONE StandardScaler on the merged
 TRAIN split only, write train/holdout Parquet + scaler.json + a markdown report.
 
-The pre-integration IDS2018-only train table and scaler are archived first so
-the A/B can still be run against the original model.
-
 Run:  PYTHONPATH=src ~/venvs/rl-ids/bin/python -m rl_ids.preprocess
 """
 from __future__ import annotations
 
 import json
-import shutil
 import sys
 import warnings
 
@@ -335,16 +331,6 @@ def write_report(train: pd.DataFrame, holdouts: dict[str, pd.DataFrame],
     return text
 
 
-def archive_baseline() -> None:
-    """Preserve the pre-integration IDS2018-only artifacts exactly once."""
-    if C.TRAIN_PARQUET.exists() and not C.TRAIN_IDS2018_ONLY_PARQUET.exists():
-        shutil.copyfile(C.TRAIN_PARQUET, C.TRAIN_IDS2018_ONLY_PARQUET)
-        print(f"Archived {C.TRAIN_IDS2018_ONLY_PARQUET.name}")
-    if C.SCALER_JSON.exists() and not C.SCALER_IDS2018_BASELINE_JSON.exists():
-        shutil.copyfile(C.SCALER_JSON, C.SCALER_IDS2018_BASELINE_JSON)
-        print(f"Archived {C.SCALER_IDS2018_BASELINE_JSON.name}")
-
-
 def main() -> int:
     C.PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     frames: list[pd.DataFrame] = []
@@ -397,7 +383,6 @@ def main() -> int:
           f"IDS2018 holdout: {len(holdout_2018):,} rows | "
           f"IDS2017 holdout: {len(holdout_2017):,} rows")
 
-    archive_baseline()
     scaler_payload = fit_and_apply_scaler(train, [holdout_2018, holdout_2017])
     train.to_parquet(C.TRAIN_PARQUET, index=False)
     holdout_2018.to_parquet(C.HOLDOUT_PARQUET, index=False)
