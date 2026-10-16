@@ -226,16 +226,19 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── per.py               # sum-tree prioritized replay buffer + β schedule
 │   ├── evaluate.py          # shared greedy/random rollout evaluation
 │   ├── train_per.py         # PER training driver (report + curve)
+│   ├── metrics.py           # pure per-class precision/recall/F1/FPR functions
+│   ├── holdout_eval.py      # probe-based holdout detection evaluation driver
 │   └── validate_reward.py   # reward verification report + replay check
 │
-├── tests/                   # pytest suite (119 tests)
+├── tests/                   # pytest suite (131 tests)
 │   ├── test_dataset_preprocessing.py
 │   ├── test_ids2017_integration.py
 │   ├── test_environment.py
 │   ├── test_reward_function.py
 │   ├── test_tabular_mc_control.py
 │   ├── test_dqn.py
-│   └── test_per.py
+│   ├── test_per.py
+│   └── test_holdout_metrics.py
 │
 ├── docs/
 │   ├── dataset_preprocessing.md   # acquisition, cleaning, merge, splits
@@ -243,7 +246,8 @@ RL-Based-Intrusion-Detection-Project/
 │   ├── reward_function.md         # reward design + worked example
 │   ├── tabular_mc_control.md      # MC control vs exact Bellman solution
 │   ├── double_dqn.md              # Double DQN agent design + training
-│   └── prioritized_replay.md      # prioritized replay: sum-tree, IS, results
+│   ├── prioritized_replay.md      # prioritized replay: sum-tree, IS, results
+│   └── holdout_evaluation.md      # per-class P/R/F1/FPR on the untouched holdouts
 │
 ├── data/
 │   ├── raw/                 # downloaded CSVs (git-ignored)
@@ -348,7 +352,21 @@ Same agent and settings as step 5, but with proportional prioritized replay
 (sum-tree sampling + importance-sampling correction). It is the other heavy
 online step.
 
-### 7. Run the test suite
+### 7. Per-class detection evaluation on the untouched holdouts
+
+```bash
+PYTHONPATH=src python -m rl_ids.holdout_eval    # -> holdout_classification_report.md + holdout_confusion_matrix.png
+```
+
+Loads both trained checkpoints and measures **per-class precision / recall /
+F1 / FPR** on the two eval-only holdout days. No retraining. The action mask is
+*not* handed to the evaluation — it is a one-to-one function of the hidden
+severity bucket, so using it would make detection trivially perfect. Instead a
+logistic-regression probe is fitted on the frozen 128-d layer of the Q-network
+(train split only) and tested on the holdouts, with the raw-17-feature probe as
+a no-representation baseline.
+
+### 8. Run the test suite
 
 ```bash
 python -m pytest tests/ -q
@@ -369,6 +387,7 @@ replace `python` with its interpreter if needed.)*
 | Tabular MC sanity check | ✅ done | [`docs/tabular_mc_control.md`](docs/tabular_mc_control.md) |
 | Double DQN | ✅ done | [`docs/double_dqn.md`](docs/double_dqn.md) |
 | Prioritized Experience Replay | ✅ done | [`docs/prioritized_replay.md`](docs/prioritized_replay.md) |
+| Holdout detection evaluation | ✅ done | [`docs/holdout_evaluation.md`](docs/holdout_evaluation.md) |
 
 ---
 
@@ -417,6 +436,34 @@ Compromised were already within ≈0.15 and barely move.
 
 ![PER learning curve](data/processed/prioritized_replay_learning_curve.png)
 
+### Holdout detection (per-class precision / recall / F1 / FPR)
+
+The two trained agents are then scored on the **untouched holdout days** —
+`holdout_infiltration` (CSE-CIC-IDS2018) and
+`holdout_ids2017_portscan_ddos` (CIC-IDS2017) — using a logistic-regression
+probe on the frozen 128-d layer of `Q_online` fitted on the train split only.
+Corrupted observations (noise + telemetry masking, as at training time), 3,000
+flows per bucket:
+
+| Model | Holdout | Accuracy | Macro F1 | Mean attack recall | Benign FPR |
+|-------|---------|---------:|---------:|-------------------:|-----------:|
+| uniform DQN | Infiltration (2018) | 0.468 | 0.267 | 0.166 | 0.173 |
+| PER | Infiltration (2018) | 0.473 | 0.271 | 0.170 | 0.168 |
+| raw-17 baseline | Infiltration (2018) | 0.456 | 0.284 | 0.264 | 0.256 |
+| uniform DQN | PortScan + DDoS (2017) | 0.620 | 0.533 | 0.746 | 0.141 |
+| PER | PortScan + DDoS (2017) | **0.641** | **0.556** | 0.724 | **0.138** |
+| raw-17 baseline | PortScan + DDoS (2017) | 0.605 | 0.524 | 0.617 | 0.159 |
+
+The pattern is a **coverage** story, not a tuning one: the 2017 holdout's DDoS
+family is represented in training by ~1.24M rows of 2018 `HOIC`/`LOIC` traffic,
+and PER recalls DDoS at **0.967** (F1 0.919). `PortScan` (0.480) and
+`Infilteration` (0.170) have no counterpart in training and are missed. The
+per-class tables also make the **mask leak** explicit: supplying the true action
+mask scores **0.999** accuracy, while mask-free Q-argmax scores **0.199** —
+so a probe, not the agent's actions, is the only honest detection signal here.
+
+![Holdout confusion matrices](data/processed/holdout_confusion_matrix.png)
+
 ---
 
 ## 🗺️ Roadmap
@@ -427,7 +474,7 @@ Compromised were already within ≈0.15 and barely move.
 - [x] Tabular Monte-Carlo control vs exact Bellman solution
 - [x] Double DQN with target network (recovers the optimal response policy)
 - [x] Prioritized Experience Replay (sum-tree + IS correction; sharpens Suspicious)
-- [ ] Per-class precision / recall / F1 / FPR on the untouched holdouts
+- [x] Per-class precision / recall / F1 / FPR on the untouched holdouts
 
 ---
 

@@ -454,3 +454,9 @@ PER_EPS = 1e-5              # priority floor, keeps every transition sampleable
 PER_REPORT_PATH = PROCESSED_DIR / "prioritized_replay_report.md"
 PER_CURVE_PNG = PROCESSED_DIR / "prioritized_replay_learning_curve.png"
 PER_MODEL_PATH = MODELS_DIR / "double_dqn_per.pt"
+
+# --------------------------------------------------------------------------- #
+# Holdout per-class detection evaluation (probe on the learned representation)
+# --------------------------------------------------------------------------- #
+HOLDOUT_EVAL_REPORT_PATH = PROCESSED_DIR / "holdout_classification_report.md"
+HOLDOUT_EVAL_CM_PNG = PROCESSED_DIR / "holdout_confusion_matrix.png"
